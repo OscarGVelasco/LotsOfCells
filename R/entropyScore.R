@@ -91,19 +91,15 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
   message(paste("Computing Entropy proportion over covariables for groups:",labelOrder[1],"vs",labelOrder[2]))
   df <- data.frame(groups, covariable)
   df <- table(df)
-  # df2[df2==0] <- 1
-  # contig_tab <- apply(df, 1, function(row){row/sum(row)})[, labelOrder]
   contig_tab <- t(apply(pseudoCount(df), 1, function(row){row/(sum(row))}))[labelOrder, ]
-
   indexes <- colnames(contig_tab)
   relative_entropies <- apply(contig_tab,1,function(x){
     abs(log2((x[1]*log2(x[2])) / (x[1]*log2(x[1]))))
   })
-  # distance_surprise <- function(p, q){
-  #   return(sum( (sqrt(-((p*log2(p/q)) * (q*log2(q/p))) ) ) ))
-  # }
+  geom_mean <- function(x){exp(mean(log(x)))}
+  # Test using the geometric mean to summarise the entropy distances scores across cell types
   distance_surprise <- function(p, q){
-    return(sum(abs(p*log2(p/q))) +  sum(abs(q*log2(q/p))))
+    return(geom_mean(abs(p*log2(p/q)))+geom_mean(abs(q*log2(q/p))) )
   }
   entropy_score <- distance_surprise(p=contig_tab[1,], q=contig_tab[2,])
   # Montecarlo test for random entropy distribution
@@ -111,11 +107,9 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
     samples <- as.character(main_metadata[, sample_id])
     nPerSample <- table(data.frame(groups, samples))[labelOrder,]
     nPerSample <- sqrt(nPerSample)
-    #cellCrowd <- apply(nPerSample, 1, function(perCond){list(perCond[perCond!=0]*(1/10))})
     cellCrowd <- apply(nPerSample, 1, function(perCond){list(perCond[perCond!=0])})
     cellCrowd <- cellCrowd[labelOrder]
   }else{
-    #cellCrowd <- round(c(table(groups)*(1/10)))[labelOrder]
     cellCrowd <- round(sqrt(c(table(groups)))[labelOrder])
   }
   message(paste("Starting montecarlo simulation with n. permutations:",permutations))
@@ -143,30 +137,11 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
       # dftmp[dftmp == 0] = 1 * instead of using pseudocount 1 use arcsin:
       # Obtain Frequencies of classes
       contig_tab_random <- t(apply(pseudoCount(dftmp),2,function(row){row/(sum(row))}))[labelOrder, indexes]
-      # random_entropies <- apply(contig_tab_random,2,function(x){
-      #   abs(log2((x[1]*log2(x[2])) / (x[1]*log2(x[1]))))})
-      # random_entropies <- abs(log2(sum(apply(contig_tab_random,1,function(x){x[1]*log2(x[2])}))/sum(apply(contig_tab,1,function(x){x[1]*log2(x[1])}))))
-      # random_entropies2 <- abs(log2(sum(apply(contig_tab_random,1,function(x){x[2]*log2(x[1])}))/sum(apply(contig_tab,1,function(x){x[2]*log2(x[2])}))))
-      # random_entropies <- sqrt(random_entropies + random_entropies2)
-      # ratios <- apply(contig_tab_random, 1, function(percents){(log2(percents[1]/percents[2]))})
-      # random_entropies <- exp(mean(log(abs(ratios))))
-      #information <- abs(apply(contig_tab_random,2,function(x)sum(vapply(x,function(z)z*log2(z),FUN.VALUE = double(1)))))
-      #entropy_score <- abs(log2(information[1]/information[2]))
       entropy_score <- distance_surprise(contig_tab_random[1,], contig_tab_random[2,])
-      # kl_score <- apply(contig_tab_random, 2, function(x){x[1]*log2(x[1]/x[2])})
-      # #kl_score <- median(kl_score)
-      # kl_score <- 1/mean(1/abs(kl_score))
-      # #kl_score <- abs(prod(kl_score)) ^ (1 / length(kl_score))
-      # kl_score2 <- apply(contig_tab_random, 2, function(x){x[2]*log2(x[2]/x[1])})
-      # #kl_score2 <- median(kl_score2)
-      # #kl_score2 <- abs(prod(kl_score2)) ^ (1 / length(kl_score2))
-      # kl_score2 <- 1/mean(1/abs(kl_score2))
-      # entropy_score <- kl_score + kl_score2
     })
   })
   # Unpack results
   null_test_entropy <- unlist(entropy_list)
-  #print(length(null_test_entropy))
   sd_entropies <- sd(null_test_entropy)
   mean_entropies <- mean(null_test_entropy)
   median_entropies <- median(null_test_entropy)
@@ -177,9 +152,6 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
                                  alpha = 0.5, size = 1.5) +
     ggplot2::geom_segment(ggplot2::aes(x = 0.85, y = median_entropies, xend = 1.15, yend = median_entropies),
                           color="#86608E",linewidth=0.5, alpha=0.3, inherit.aes=FALSE) +
-    # ggplot2::geom_point(binaxis='y', stackdir='center',#position = ggplot2::position_jitter(width = 0.35),
-    #                     color= "#D5BADB",
-    #                     dotsize = 0.5) +
     ggplot2::geom_point(ggplot2::aes(y=entropy_score, x=factor(1)), size=4, color="#F08080") +
     ggplot2::theme_classic() +
     ggplot2::theme(axis.ticks.x = ggplot2::element_blank(), axis.text.x = ggplot2::element_blank()) +
@@ -189,13 +161,13 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
   # Calculate how extreme our observed values are in comparison with the random distribution
   # We want to see if the FoldChanges on the random distribution are lower or higher than the observed FoldChange
   p.vals <- sum(null_test_entropy >= entropy_score) / (permutations)
-  p.adj <- round(p.adjust(p = p.vals, method = "fdr"), digits = 5)
+  #p.adj <- round(p.adjust(p = p.vals, method = "fdr"), digits = 6)
   g <- ggplot2::ggplot(reshape2::melt(contig_tab),ggplot2::aes(x=covariable,y=value,fill=factor(groups))) +
     ggplot2::geom_bar(stat="identity", position=ggplot2::position_dodge()) +
     ggplot2::scale_fill_brewer(palette="Blues") +
     ggplot2::theme_minimal() +
     ggplot2::guides(fill = guide_legend(title=paste("Class:", subtype_variable), drop=FALSE)) +
-    ggplot2::ggtitle(paste("Symmetric Divergence Score:",round(entropy_score,digits = 3),"p.val.adj:",round(p.adj,digits = 3))) +
+    ggplot2::ggtitle(paste("Symmetric Divergence Score:",round(entropy_score, digits = 3),"p.val.adj:",round(p.adj,digits = 3))) +
     ggplot2::theme(
       title = ggplot2::element_text(face="bold", size=ggplot2::rel(1.2)),
       strip.text=ggplot2::element_text(face="bold", size=ggplot2::rel(0.8)),
@@ -203,7 +175,6 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
       axis.text.x=ggplot2::element_text(angle=45, vjust=1, hjust=1,size = 12)
     ) +
     ggplot2::ylab("proportion")
-  #print(g)
   gridExtra::grid.arrange(g,g.entropies,nrow=1,ncol=2,widths=c(1,0.3))
   return(c(relative_entropies,"entropy_score"=entropy_score,"p.val.adj"=p.adj, "mean.random.entropy"= mean_entropies, "sd.random.entropy"=sd_entropies))
 }
