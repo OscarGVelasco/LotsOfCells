@@ -162,8 +162,11 @@ lotOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL,
     }
     df <- data.frame(groups, covariable)
     df.table <- table(df)
+    # Logit transformation:
+    logit <- function(fractions){log(fractions/(1-fractions))}
     contig_tab <- t(apply(pseudoCount(df.table),1,function(row){row/sum(row)}))[labelOrder,]    # # CONTRUCTION
-    original_test <- log2(contig_tab[1,] / contig_tab[2,])
+    #original_test <- log2(contig_tab[1,] / contig_tab[2,])
+    original_test <- logit(contig_tab[1,]) - logit(contig_tab[2,])
     indexes <- names(original_test)
     if(is.null(sample_id)){
       cellCrowd <- round(sqrt(c(table(groups))))
@@ -185,7 +188,7 @@ lotOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL,
     higuer_in_null <- (rowSums(apply(null_test_fcs[,indexes],1, function(x){original_test <= x}))+1) / (permutations+1)
     lower_in_null <- (rowSums(apply(null_test_fcs[,indexes],1, function(x){original_test >= x}))+1) / (permutations+1)
     p.vals <- apply(rbind(original_test, higuer_in_null, lower_in_null), 2, function(x)ifelse(x[1]>0, x[2], x[3]))
-    p.adj <- round(p.adjust(p = p.vals,method = "bonferroni"), digits = 5)
+    p.adj <- round(p.adjust(p = p.vals,method = "fdr"), digits = 5)
     sd.montecarlo <- apply(null_test_fcs, 2, sd)
     # test 2 #
     # We calculate the Coefficient Intervals for the Montecarlo simulation of the real data:

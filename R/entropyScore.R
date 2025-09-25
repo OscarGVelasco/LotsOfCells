@@ -189,7 +189,7 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
   # Calculate how extreme our observed values are in comparison with the random distribution
   # We want to see if the FoldChanges on the random distribution are lower or higher than the observed FoldChange
   p.vals <- sum(null_test_entropy >= entropy_score) / (permutations)
-  p.adj <- round(p.adjust(p = p.vals, method = "bonferroni"), digits = 5)
+  p.adj <- round(p.adjust(p = p.vals, method = "fdr"), digits = 5)
   g <- ggplot2::ggplot(reshape2::melt(contig_tab),ggplot2::aes(x=covariable,y=value,fill=factor(groups))) +
     ggplot2::geom_bar(stat="identity", position=ggplot2::position_dodge()) +
     ggplot2::scale_fill_brewer(palette="Blues") +
