@@ -27,7 +27,7 @@ density_chart(
 
 \item{subtype_only}{Character. Visualize only a specific class from subtype_variable. Useful if for example you only want to show the proportions of a specific cell type or subclass.}
 
-\item{colors}{Character vector. Vector of colors defined by the user to be used as palette. If more colors than specified are required, colorRampPalette will be used to create additional colors. If not specified the LotOfCells default color palette is used.}
+\item{colors}{Character vector. Vector of colors defined by the user to be used as palette. If more colors than specified are required, colorRampPalette will be used to create additional colors. If not specified the lotsOfCells default color palette is used.}
 }
 \value{
 The function returns a ggplot object with the barplot representing the population frequencies on the requested variables.

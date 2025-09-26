@@ -1,6 +1,6 @@
 #' Compute proportion tests on single-cell data metadata.
 #'
-#' `lotOfCells()` returns a dataframe containing the results and statistics for the given variables and covariables.
+#' `lotsOfCells()` returns a dataframe containing the results and statistics for the given variables and covariables.
 #'
 #' This function will calculate a fold change of the proportions if two classes are specified, if more than two ordered classes are specified a Kendall rank correlation coefficient will be computed (e.g.: c("type-A", type_B", type_C") will compute a rank correlation to test whether proportions increase or decrease concordantly from A to B and from B to C).
 #' In both cases a Montecarlo simulation to compute coefficients from a random sampling of the whole population will be done, and a p.value of how extreme is the observed score compared with the simulation values will be computed. A plot will be produced with the results, in the case of two class comparison, a pink shade is drawn to show the Montecarlo simulation standard deviation.
@@ -37,7 +37,7 @@
 #' covariable <- c(groups1, groups2)
 #' # We construct a metadata dataframe
 #' meta.data <- data.frame(groups, covariable)
-#' lotOfCells(scObject = meta.data,
+#' lotsOfCells(scObject = meta.data,
 #'           main_variable = "groups", # The column in meta.data to be used as the main variable (groups A and B)
 #'           subtype_variable = "covariable", # The column in meta.data to be used as covariable (cell types)
 #'           labelOrder = c("B","A"), # Order of the constrast, we will obtain the fold changes as: B vs A
@@ -53,7 +53,7 @@
 #' groups <- c(rep("A",length(groups1)),rep("B",length(groups2)),rep("C",length(groups3)),rep("D",length(groups4)))
 #' covariable <- c(groups1, groups2,groups3,groups4)
 #' meta.data <- data.frame(groups, covariable)
-#' lotOfCells(scObject = meta.data,
+#' lotsOfCells(scObject = meta.data,
 #'           main_variable = "groups",
 #'           subtype_variable = "covariable",
 #'           labelOrder = c("B","A","D","C"), # Order of the constrast, for gamma correlation it will test for an upward/downward pattern through B -> A -> D -> C
@@ -65,7 +65,7 @@
 #' @importFrom methods is
 #' @importFrom BiocParallel bplapply
 #' @export
-lotOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL, labelOrder=c(""), sample_id=NULL, permutations=1000, parallel=FALSE){
+lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL, labelOrder=c(""), sample_id=NULL, permutations=1000, parallel=FALSE){
   # Obtain the single-cell metadata
   main_metadata <- getMetadata(scObject)
   # Test that all groups are in the data:

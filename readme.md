@@ -1,4 +1,4 @@
-# Lot Of Cells
+# Lots Of Cells
 
 Proportion test statistics and visualization on single cell metadata. A simple package for single cell metadata exploration.
 
@@ -8,7 +8,7 @@ The package can be installed from R software using devtools:
 
 ```r
 library(devtools)
-install_github("OscarGVelasco/lotOfCells")
+install_github("OscarGVelasco/lotsOfCells")
 ```
 
 ### How to cite
@@ -16,7 +16,7 @@ install_github("OscarGVelasco/lotOfCells")
 A pre-print is available at [https://doi.org/10.1101/2024.05.23.595582], which includes details on the statistical tests available in the package and examples of real use on a public lung adenocarcinoma dataset:
 
 ```
-Óscar González-Velasco; LotOfCells: data visualization and statistics of single cell metadata. bioRxiv 2024.05.23.595582; doi: https://doi.org/10.1101/2024.05.23.595582
+Óscar González-Velasco; lotsOfCells: data visualization and statistics of single cell metadata. bioRxiv 2024.05.23.595582; doi: https://doi.org/10.1101/2024.05.23.595582
 ```
 
 ### Updates:
@@ -29,18 +29,18 @@ A pre-print is available at [https://doi.org/10.1101/2024.05.23.595582], which i
 
 # Introduction
 
-Single cell sequencing unveils a treasure trove into the biological and molecular characteristics of samples. Here we introduce `LotOfCells`: a simple R package designed to explore the intricate landscape of phenotype data within single-cell studies. An archetypal example of such analysis would be to test the differences in proportion between cell-types across conditions, but it can be used in many scenarios e.g: test if a specific cell-type or class proportion is dependent of sequencing date as a quality check.
+Single cell sequencing unveils a treasure trove into the biological and molecular characteristics of samples. Here we introduce `lotsOfCells`: a simple R package designed to explore the intricate landscape of phenotype data within single-cell studies. An archetypal example of such analysis would be to test the differences in proportion between cell-types across conditions, but it can be used in many scenarios e.g: test if a specific cell-type or class proportion is dependent of sequencing date as a quality check.
 
-### Overview of tests and visualizations available in LotOfCells
+### Overview of tests and visualizations available in lotsOfCells
 
 <figure>
-<img src="./images/main_diagram_lotOfCells.jpg" alt="LotOfCells diagram" />
-<figcaption><i><b>Diagram of plots and tests available in LotOfCells. A.</b> Barplots of proportions of cell types for all individual samples from different tissues, the tissue class is depicted in the colored boxes on the x-axis. <b>B.</b> Barplots showing the cell sub-type composition of normal and metastatic lymph nodes samples, each bar corresponds to a patient. <b>C.</b> Montecarlo test for the difference in cell type population abundances between tumor and normal lung samples in stage IA. B lymphocyte population is significantly larger in tumor. <b>D.</b> Waffle plots showing B lymphocytes only for all independent patients. The number of total B lymphocytes is depicted in grey. Each square=1\%. <b>E.</b> Waffle plot showing IA stage for tumor and normal lung. All samples are pulled together by condition. <b>F.</b> Symmetric divergence score test between stages IA and IIIA from lung tumor. On the right a scatter violin plot showing the distribution of generated scores vs the observed value. <b>G.</b> Density plots showing expression of INSR gene in tumor and normal lung and brain metastasis endothelial subpopulations. Tumor ECs shows a distinct tail of high expression. <b>H.</b> Barplot of Myeloid cells proportions across cancer stages in lung tumor. <b>I.</b> Cell type proportion changes across cancer stages in lung tumor. Values of the Kendall Tau correlation coefficient per cell type are shown. <b>J.</b> Density plots of the age distribution across cell types. <b>K.</b> Polar plot showing the raw number of cells per tissue. </i></figcaption>
+<img src="./images/main_diagram_lotsOfCells.jpg" alt="lotsOfCells diagram" />
+<figcaption><i><b>Diagram of plots and tests available in lotsOfCells. A.</b> Barplots of proportions of cell types for all individual samples from different tissues, the tissue class is depicted in the colored boxes on the x-axis. <b>B.</b> Barplots showing the cell sub-type composition of normal and metastatic lymph nodes samples, each bar corresponds to a patien. <b>C.</b> Montecarlo test for the difference in cell type population abundances between tumor and normal lung samples in stage IA. B lymphocyte population is significantly larger in tumor. <b>D.</b> Waffle plots showing B lymphocytes only for all independent patients. The number of total B lymphocytes is depicted in grey. Each square=1\%. <b>E.</b> Waffle plot showing IA stage for tumor and normal lung. All samples are pulled together by condition. <b>F.</b> Symmetric divergence score test between stages IA and IIIA from lung tumor. On the right a scatter violin plot showing the distribution of generated scores vs the observed value. <b>G.</b> Density plots showing expression of INSR gene in tumor and normal lung and brain metastasis endothelial subpopulations. Tumor ECs shows a distinct tail of high expression. <b>H.</b> Barplot of Myeloid cells proportions across cancer stages in lung tumor. <b>I.</b> Cell type proportion changes across cancer stages in lung tumor. Values of the Kendall Tau correlation coefficient per cell type are shown. <b>J.</b> Density plots of the age distribution across cell types. <b>K.</b> Polar plot showing the raw number of cells per tissue. </i></figcaption>
 </figure>
 
 # Manual
 
-`LotOfCells` is compatible with `Seurat` and `SingleCellExperiment` objects. You can also directly provide a dataframe with the metadata.
+`lotsOfCells` is compatible with `Seurat` and `SingleCellExperiment` objects. You can also directly provide a dataframe with the metadata.
 All functions require the following inputs:
 -   `scObject`: An object of class `Seurat` or `SingleCellExperiment`, or a dataframe containing the metadata.
 -   `main_variable`: Column name containing the main class variable (e.g., condition, treatment, tissue).
@@ -71,7 +71,7 @@ head(meta.data)
 
 ```
 
-First, let's visualize the data using `LotOfCells`. In these functions, you can also specify:
+First, let's visualize the data using `lotsOfCells`. In these functions, you can also specify:
 
 -   `subtype_only`: Visualize only a specific class from `subtype_variable`. Useful if for example you only want to show the proportions of a specific cell type or subclass.
 
@@ -79,7 +79,7 @@ First, let's visualize the data using `LotOfCells`. In these functions, you can 
 
 Barplots are displayed in such an order that the class with the largest average proportion is always at the bottom, making it easier to compare smaller groups at the top.
 
-`LotOfCells` can be used with any other combination of variables (different from cell type). Here (Figure D), by switching the `subtype_variable` to the time-points we can investigate the contribution of time-points to the main condition, serving as a quality check to understand the weight of some covarites to the target condition (e.g. time points, sequencing dates or different tissues):
+`lotsOfCells` can be used with any other combination of variables (different from cell type). Here (Figure D), by switching the `subtype_variable` to the time-points we can investigate the contribution of time-points to the main condition, serving as a quality check to understand the weight of some covarites to the target condition (e.g. time points, sequencing dates or different tissues):
 
 ```r
 # # Test of barplot charts:
@@ -100,7 +100,7 @@ ggpubr::ggarrange(g.A, g.B, g.C, g.D, labels = c("A", "B", "C","D"),
 ```
 
 <figure>
-<img src="./images/Figure1_LoC.jpeg" alt="LotOfCells barplots" width="700" height="520" />
+<img src="./images/Figure1_LoC.jpeg" alt="lotsOfCells barplots" width="700" height="520" />
 <figcaption><i> Example barplots. </i></figcaption>
 </figure>
 
@@ -121,7 +121,7 @@ ggpubr::ggarrange(g.A, g.B, labels = c("A", "B"),
 ```
 
 <figure>
-<img src="./images/Figure1.2_LoC.jpeg" alt="LotOfCells barplots" width="700" height="400" />
+<img src="./images/Figure1.2_LoC.jpeg" alt="lotsOfCells barplots" width="700" height="400" />
 <figcaption><i> Example barplots with contribution per class. </i></figcaption>
 </figure>
 
@@ -148,7 +148,7 @@ ggpubr::ggarrange(g.B, g.A, g.C, g.D, labels = c("A", "B", "C", "D"),
 ```
 
 <figure>
-<img src="./images/Figure2_LoC.jpeg" alt="LotOfCells waffle plots" />
+<img src="./images/Figure2_LoC.jpeg" alt="lotsOfCells waffle plots" />
 <figcaption><i> Example waffle plots. </i></figcaption>
 </figure>
 
@@ -176,7 +176,7 @@ ggpubr::ggarrange(g.A, g.B, labels = c("A", "B"),
 ```
 
 <figure>
-<img src="./images/Figure_3.1.1.jpeg" alt="LotOfCells density plots" />
+<img src="./images/Figure_3.1.1.jpeg" alt="lotsOfCells density plots" />
 <figcaption><i> Example density plots. </i></figcaption>
 </figure>
 
@@ -190,14 +190,14 @@ density_chart(scObject = sc_pancreas_human, main_variable = "donor", subtype_var
 ```
 
 <figure>
-<img src="./images/Figure_3.1.2.jpeg" alt="LotOfCells density plots of gene expression" />
+<img src="./images/Figure_3.1.2.jpeg" alt="lotsOfCells density plots of gene expression" />
 <figcaption><i> Example density plots showing expression of SST in delta cells. </i></figcaption>
 </figure>
 
 
 ### Personalizing the colors:
 
-Colors can be easily changed for bar, waffle, or polar plots using the `colors` option. To do this, simply provide a vector of colors to use. If the specified colors are insufficient, a palette will be created using colorRampPalette based on the colors specified. If no colors are specified, the default color palette of LotOfCells will be used.
+Colors can be easily changed for bar, waffle, or polar plots using the `colors` option. To do this, simply provide a vector of colors to use. If the specified colors are insufficient, a palette will be created using colorRampPalette based on the colors specified. If no colors are specified, the default color palette of lotsOfCells will be used.
 
 ```r
 # # Using different colors:
@@ -211,7 +211,7 @@ ggpubr::ggarrange(g.A, g.B, labels = c("A", "B"), ncol=2, nrow=1, widths = c(0.4
 ```
 
 <figure>
-<img src="./images/Figure2.2_LoC.jpeg" alt="LotOfCells changing the colors" width="800" height="320" />
+<img src="./images/Figure2.2_LoC.jpeg" alt="lotsOfCells changing the colors" width="800" height="320" />
 <figcaption><i> Example using personalised color palette. </i></figcaption>
 </figure>
 
@@ -237,7 +237,7 @@ BiocParallel::register(BPPARAM =  BiocParallel::MulticoreParam(workers = 6))
 
 ### Differential proportion test - two conditions
 
-The main feature of LotOfCells is the testing of differences in proportions, combined with a simulation of a random distribution to evaluate how extreme the observations might be. To compare the proportions of a specific class between two conditions, define the two classes and their order from the `main_variable` column. Optionally, the `sample_id` column (or another sub-class level) can be set to account for per-sample heterogeneity in the computational simulation.
+The main feature of lotsOfCells is the testing of differences in proportions, combined with a simulation of a random distribution to evaluate how extreme the observations might be. To compare the proportions of a specific class between two conditions, define the two classes and their order from the `main_variable` column. Optionally, the `sample_id` column (or another sub-class level) can be set to account for per-sample heterogeneity in the computational simulation.
 
 ***NOTE: for significance testing we recommend an $\alpha$ value of 0.001**
 
@@ -246,7 +246,7 @@ A plot of the differences in proportions is generated, with pink shades represen
 ```r
 # # Test of 2 conditions using montecarlo and differences in percentage
 labelOrder <- c("mut","wt")
-results.2.conditions <- lotOfCells(scObject = meta.data,
+results.2.conditions <- lotsOfCells(scObject = meta.data,
                                       main_variable = "condition",
                                       subtype_variable = "cell_type",
                                       sample_id = "sample",
@@ -257,7 +257,7 @@ print(results.2.conditions)
 ```
 
 <figure>
-<img src="./images/Figure3_LoC.jpeg" alt="LotOfCells waffle plots" width="500" height="400" />
+<img src="./images/Figure3_LoC.jpeg" alt="lotsOfCells waffle plots" width="500" height="400" />
 <figcaption><i> Test of differences in proportion. </i></figcaption>
 </figure>
 
@@ -279,18 +279,18 @@ results.2.conditions.entropy <- entropyScore(scObject = meta.data,
 ```
 
 <figure>
-<img src="./images/Figure4_LoC.jpeg" alt="LotOfCells symmetric score plot" width="600" height="332" />
+<img src="./images/Figure4_LoC.jpeg" alt="lotsOfCells symmetric score plot" width="600" height="332" />
 <figcaption><i> Test of symmetric entropy score in global proportions. </i></figcaption>
 </figure>
 
 ### Differential proportion test - more than two conditions
 
-The test of differences in proportions available in LotOfCells can be done with more than 2 conditions, by computing a Kendall rank correlation coefficient. To compare the proportions of a specific class between several conditions we will need to define the classes and the order in which they will be compared from the column specified in `main_variable`, the correlation (positive and negative) will be tested following the order defined. Optionally, like introduced above, we can set the sample_id column (or other sub-class level) to include the per-sample heterogeneity in the computational simulation.
+The test of differences in proportions available in lotsOfCells can be done with more than 2 conditions, by computing a Kendall rank correlation coefficient. To compare the proportions of a specific class between several conditions we will need to define the classes and the order in which they will be compared from the column specified in `main_variable`, the correlation (positive and negative) will be tested following the order defined. Optionally, like introduced above, we can set the sample_id column (or other sub-class level) to include the per-sample heterogeneity in the computational simulation.
 
 ```r
 # # Test of correlation for SEVERAL conditions using Kendall rank correlation
 labelOrder <- c("time 0h","time 2h","time 4h")
-results.3.conditions <- lotOfCells(scObject = meta.data,
+results.3.conditions <- lotsOfCells(scObject = meta.data,
                                 main_variable = "times",
                                 subtype_variable = "cell_type",
                                 sample_id = "sample",
@@ -302,6 +302,6 @@ dynamics_chart(gammaResults = results.3.conditions)
 ```
 
 <figure>
-<img src="./images/Figure5_LoC.jpeg" alt="LotOfCells proportion test with more than 2 conditions" width="700" height="450" />
-<figcaption><i> LotOfCells proportion test with more than 2 conditions. </i></figcaption>
+<img src="./images/Figure5_LoC.jpeg" alt="lotsOfCells proportion test with more than 2 conditions" width="700" height="450" />
+<figcaption><i> lotsOfCells proportion test with more than 2 conditions. </i></figcaption>
 </figure>

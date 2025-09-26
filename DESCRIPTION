@@ -1,11 +1,10 @@
-Package: LotOfCells
+Package: LotsOfCells
 Type: Package
-Title: Compute proportion tests statistics on single-cell data metadata.
-Version: 0.3.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: More about what it does (maybe more than one line)
-    Use four spaces when indenting paragraphs within the Description.
+Title: LotsOfCells: Compute proportion tests statistics on single-cell data metadata.
+Version: 0.1.4
+Author: Oscar Gonzalez-Velasco
+Maintainer: Oscar Gonzalez-Velasco <oscar.gonzalezvelasco@dkfz-heidelberg.de>
+Description: A package that computes differences in cell type proportions using different statistical methods and numerous visualisation methods.
 License: Artistic-2.0
 Encoding: UTF-8
 Imports: 
