@@ -167,7 +167,7 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
     ggplot2::scale_fill_brewer(palette="Blues") +
     ggplot2::theme_minimal() +
     ggplot2::guides(fill = guide_legend(title=paste("Class:", subtype_variable), drop=FALSE)) +
-    ggplot2::ggtitle(paste("Symmetric Divergence Score:",round(entropy_score, digits = 3),"p.val.adj:",round(p.adj,digits = 3))) +
+    ggplot2::ggtitle(paste("Symmetric Divergence Score:", round(entropy_score, digits=3), "p.val.adj:", round(p.vals, digits=3))) +
     ggplot2::theme(
       title = ggplot2::element_text(face="bold", size=ggplot2::rel(1.2)),
       strip.text=ggplot2::element_text(face="bold", size=ggplot2::rel(0.8)),
@@ -176,7 +176,7 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
     ) +
     ggplot2::ylab("proportion")
   gridExtra::grid.arrange(g,g.entropies,nrow=1,ncol=2,widths=c(1,0.3))
-  return(c(relative_entropies,"entropy_score"=entropy_score,"p.val.adj"=p.adj, "mean.random.entropy"= mean_entropies, "sd.random.entropy"=sd_entropies))
+  return(c(relative_entropies,"entropy_score"=entropy_score,"p.val"=p.vals, "mean.random.entropy"= mean_entropies, "sd.random.entropy"=sd_entropies))
 }
 
 # groups1 <- c(rep("CellA",700),rep("CellB",300),rep("CellC",500),rep("CellD",1000))
