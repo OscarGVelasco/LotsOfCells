@@ -81,12 +81,12 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
   main_metadata <- main_metadata[main_metadata[, main_variable] %in% labelOrder ,]
   groups <- as.character(main_metadata[, main_variable])
   covariable <- as.character(main_metadata[, subtype_variable])
-  pseudoCount <- function(counts){counts + sqrt(counts^2+1)}
-  # ###
-  # covariable <- milk.metadata$General_Celltype
-  # groups <- as.character(as.numeric(milk.metadata$time_post_partum_days))
-  # labelOrder <- as.character(sort(unique(as.numeric(milk.metadata$time_post_partum_days))))
-  # ###
+  #pseudoCount <- function(counts){counts + sqrt((counts^2)+1)}
+  pseudoCount <- function(counts){counts + 0.5}
+  # arcsin square root transformation
+  asrt <- function(proportion){asin(sqrt(proportion))}
+  #min_cells <- 20
+  min_cells <- 6
   if(length(labelOrder)<2){
     stop("You have to specify the order of testing for the labels (labelOrder=c(label1,label2,labeln...)")
   }
@@ -96,7 +96,8 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
     # Set variables for the random permutation test:
     message("More than 2 groups detected.")
     message(paste("Computing Goodman and Kruskal's gamma rank correlation coefficient in the following order:",paste(labelOrder,collapse = ' vs ')))
-    cellCrowd <- round(sqrt(c(table(groups))))
+    #cellCrowd <- round(sqrt(c(table(groups))))
+    cellCrowd <- round(pmax(sqrt(c(table(groups))), min_cells))
     cellCrowd <- cellCrowd[labelOrder]
     kendallDenominator <- (length(labelOrder) * (length(labelOrder)-1)) / 2 #n. of pairs to be compared: (N * (N-1)) / 2
     # Proportions
@@ -142,7 +143,7 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
     higuer_in_null <- round((rowSums(apply(random_gamma_cor[,indexes],1, function(x){original_gamma_cor <= x}), na.rm = TRUE)) / (permutations), digits=5)
     lower_in_null <- round((rowSums(apply(random_gamma_cor[,indexes],1, function(x){original_gamma_cor >= x}), na.rm = TRUE)) / (permutations), digits=5)
     p.vals <- apply(rbind(original_gamma_cor, higuer_in_null, lower_in_null), 2, function(x)ifelse(x[1]>0, x[2], x[3]))
-    p.adj <- round(p.adjust(p=p.vals, method="bonferroni"), digits=5)
+    p.adj <- round(p.adjust(p=p.vals, method="fdr"), digits=5)
     table.results <- data.frame(groupGammaCor=round(original_gamma_cor, 4), round(t(contig_tab)[,labelOrder],3), p.adj, CI95low=round(subsampled_gamma_CI[1,indexes],4), CI95high=round(subsampled_gamma_CI[2,indexes],4))
     colnames(table.results) <- c("groupGammaCor", c(sapply(labelOrder,function(label)paste0("percent_in_",label))), "p.adj","CI95low", "CI95high")
     return(table.results)
@@ -157,19 +158,22 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
       message(paste("Additional sub-level for testing:",sample_id))
       samples <- as.character(main_metadata[, sample_id])
       nPerSample <- table(data.frame(groups,samples))[labelOrder,]
-      cellCrowd <- apply(nPerSample, 1, function(perCond){list(sqrt(perCond[perCond!=0]))})
+      #cellCrowd <- apply(nPerSample, 1, function(perCond){list(pmax(0.15*(perCond[perCond!=0])), min_cells)})
+      cellCrowd <- apply(nPerSample, 1, function(perCond){list(pmax(sqrt(perCond[perCond!=0])), min_cells)})
       cellCrowd <- cellCrowd[labelOrder]
     }
     df <- data.frame(groups, covariable)
     df.table <- table(df)
     # Logit transformation:
     logit <- function(fractions){log(fractions/(1-fractions))}
-    contig_tab <- t(apply(pseudoCount(df.table),1,function(row){row/sum(row)}))[labelOrder,]    # # CONTRUCTION
+    contig_tab <- t(apply(pseudoCount(df.table),1,function(row){row/(sum(row)+1)}))[labelOrder,]    # # CONTRUCTION
+    #original_test <- logit(contig_tab[1,]) - logit(contig_tab[2,])
     #original_test <- log2(contig_tab[1,] / contig_tab[2,])
-    original_test <- logit(contig_tab[1,]) - logit(contig_tab[2,])
+    original_test <- log2(asrt(contig_tab[1,])/asrt(contig_tab[2,]))
     indexes <- names(original_test)
     if(is.null(sample_id)){
-      cellCrowd <- round(sqrt(c(table(groups))))
+      #cellCrowd <- round(pmax(0.15*(c(table(groups))), min_cells))
+      cellCrowd <- round(pmax(sqrt(c(table(groups))), min_cells))
       cellCrowd <- cellCrowd[labelOrder]
     }
     # We perform the Montecarlo test

@@ -35,9 +35,12 @@ cellToMontecarlo <- function(covariable=NULL,groups=NULL, labelOrder, indexes, c
     dftmp <- rbind(dftmp, tmp)[indexes,]
   }
   # dftmp[dftmp == 0] = 1 * instead of using pseudocount 1 use arcsin:
-  pseudoCount <- function(counts){counts + sqrt((counts*counts)+1)}
+  #pseudoCount <- function(counts){counts + sqrt((counts*counts)+1)}
+  pseudoCount <- function(counts){counts + 0.5}
   # Logit transformation:
   logit <- function(fractions){log(fractions/(1-fractions))}
+  # arcsin square root transformation
+  asrt <- function(proportion){asin(sqrt(proportion))}
   # Obtain Frequencies of classes
   contig_tab <- t(apply(pseudoCount(dftmp),2,function(row){row/(sum(row)+1)}))[labelOrder, indexes]
 
@@ -63,9 +66,8 @@ cellToMontecarlo <- function(covariable=NULL,groups=NULL, labelOrder, indexes, c
     dforigin <- rbind(dforigin, tmp)[indexes,]
   }
   # dforigin[dforigin == 0] = 1 * instead of using pseudocount 1 use arcsin:
-  pseudoCount <- function(counts){counts + sqrt((counts*counts)+1)}
-  contig_tab_origin <- t(apply(pseudoCount(dforigin),2,function(row){row/(sum(row)+1)}))[labelOrder, indexes]
-
+  contig_tab_origin <- t(apply(pseudoCount(dforigin),2,function(row){row/(sum(row))}))[labelOrder, indexes]
   #return(list(log2(contig_tab[1,] / contig_tab[2,]), log2(contig_tab_origin[1,] / contig_tab_origin[2,])))
-  return(list(logit(contig_tab[1,]) - logit(contig_tab[2,]), logit(contig_tab_origin[1,]) - logit(contig_tab_origin[2,])))
+  #return(list(logit(contig_tab[1,]) - logit(contig_tab[2,]), logit(contig_tab_origin[1,]) - logit(contig_tab_origin[2,])))
+  return(list( log2(asrt(contig_tab[1,])/asrt(contig_tab[2,])), log2(asrt(contig_tab_origin[1,])/asrt(contig_tab_origin[2,]))))
 }
