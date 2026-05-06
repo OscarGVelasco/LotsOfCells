@@ -85,8 +85,8 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
   pseudoCount <- function(counts){counts + 0.5}
   # arcsin square root transformation
   asrt <- function(proportion){asin(sqrt(proportion))}
-  #min_cells <- 20
-  min_cells <- 6
+  min_cells <- 10
+  #min_cells <- 10 # BEST
   if(length(labelOrder)<2){
     stop("You have to specify the order of testing for the labels (labelOrder=c(label1,label2,labeln...)")
   }
@@ -158,9 +158,36 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
       message(paste("Additional sub-level for testing:",sample_id))
       samples <- as.character(main_metadata[, sample_id])
       nPerSample <- table(data.frame(groups,samples))[labelOrder,]
+      #############################
+      # Create synthetic samples: #
+      synth_metadata <- main_metadata[, c(main_variable, subtype_variable, sample_id)]
+      mult_factor <- 2
+      new_samples = round(mean(apply(nPerSample!=0,1,sum)), digits = 0)*mult_factor
+      for (i in 1:new_samples){
+        novo <- lapply(rownames(nPerSample), function(Cond){
+          n=sample(min(nPerSample[Cond,][nPerSample[Cond,]!=0]):max(nPerSample[Cond,][nPerSample[Cond,]!=0]), size=1)
+          #n=n*0.5
+          sample(covariable[groups %in% Cond], n)
+          #sample( min(perCond[perCond!=0]), max(perCond[perCond!=0])
+          })
+        tmpdf <- data.frame(rownames(nPerSample)[1], novo[[1]], paste0("synthetic_sample_",rownames(nPerSample)[1],"_",i))
+        colnames(tmpdf) <- colnames(synth_metadata)
+        synth_metadata <- rbind.data.frame(synth_metadata, tmpdf)
+        tmpdf <- data.frame(rownames(nPerSample)[2], novo[[2]], paste0("synthetic_sample_",rownames(nPerSample)[2],"_",i))
+        colnames(tmpdf) <- colnames(synth_metadata)
+        synth_metadata <- rbind.data.frame(synth_metadata, tmpdf)
+      }
+      samples_synth <- as.character(synth_metadata[, sample_id])
+      groups_synth <- as.character(synth_metadata[, main_variable])
+      covariable_synth <- as.character(synth_metadata[, subtype_variable])
+      nPerSample_synth <- table(data.frame(groups_synth, samples_synth))[labelOrder,]
       #cellCrowd <- apply(nPerSample, 1, function(perCond){list(pmax(0.15*(perCond[perCond!=0])), min_cells)})
-      cellCrowd <- apply(nPerSample, 1, function(perCond){list(pmax(sqrt(perCond[perCond!=0])), min_cells)})
+      cellCrowd <- apply(nPerSample, 1, function(perCond){list(pmax(sqrt(perCond[perCond!=0]), min_cells))})
+      #cellCrowd <- apply(nPerSample, 1, function(perCond){list((sqrt(perCond[perCond!=0])+ min_cells))})
       cellCrowd <- cellCrowd[labelOrder]
+      #cellCrowd_synth <- apply(nPerSample_synth, 1, function(perCond){list((sqrt(perCond[perCond!=0])+ min_cells))})
+      cellCrowd_synth <- apply(nPerSample_synth, 1, function(perCond){list(pmax(0.15*(perCond[perCond!=0])), min_cells)})
+      cellCrowd_synth <- cellCrowd[labelOrder]
     }
     df <- data.frame(groups, covariable)
     df.table <- table(df)
@@ -180,7 +207,8 @@ lotsOfCells <- function(scObject=NULL, main_variable=NULL, subtype_variable=NULL
     message("- Starting montecarlo simulation of fold changes")
     null_test <- functToApply(seq_len(round(sqrt(permutations))), function(nParallelInstances){
       null_test_sub <- lapply(seq_len(permutations/round(sqrt(permutations))), function(permutationsPerInstance){
-        cellToMontecarlo(covariable, groups, labelOrder, indexes, cellCrowd)
+        cellToMontecarlo(covariable_synth, groups_synth, labelOrder, indexes, cellCrowd_synth)
+        #cellToMontecarlo(covariable, groups, labelOrder, indexes, cellCrowd)
         })
     })
     # Unpack results

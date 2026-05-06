@@ -76,8 +76,16 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
   main_metadata <- main_metadata[main_metadata[, main_variable] %in% labelOrder ,]
   groups <- as.character(main_metadata[, main_variable])
   covariable <- as.character(main_metadata[, subtype_variable])
-  if(length(labelOrder)<2){
-    stop("You have to specify the order of testing for the labels (labelOrder=c(label1,label2,labeln...)")
+  if(length(labelOrder)==0){
+    stop("You must specify labelOrder")
+  }
+  if(length(labelOrder)==1){
+    if(is.null(sample_id)){
+      stop("In 1-class test mode you must specify the sample_id variable.")
+      }
+    message(paste("Switch to 1-class test:", sample_id, "will be used to test wether there is a difference in abundance across condition:", unique(groups)))
+    samples <- as.character(main_metadata[, sample_id])
+    return(oneClassTest(main_metadata=main_metadata, samples=samples, covariable=covariable, sample_id=sample_id, permutations=permutations, parallel=parallel))
   }
   if(length(labelOrder)>2){
     stop(paste("Only 2 labels are allowed for computing the entropy estimation, found:",paste(labelOrder,collapse = ", ")))
@@ -178,6 +186,89 @@ entropyScore <- function(scObject=NULL, main_variable=NULL, subtype_variable=NUL
   gridExtra::grid.arrange(g,g.entropies,nrow=1,ncol=2,widths=c(1,0.3))
   return(c(relative_entropies,"entropy_score"=entropy_score,"p.val"=p.vals, "mean.random.entropy"= mean_entropies, "sd.random.entropy"=sd_entropies))
 }
+
+oneClassTest <- function(main_metadata=NULL, samples=NULL, covariable=NULL, sample_id=NULL, permutations=1000, parallel=FALSE){
+
+  functToApply <- base::lapply
+  if(isTRUE(parallel)){
+    functToApply <- BiocParallel::bplapply
+  }
+  # Calculate pseudocounts using the arcsin function
+  pseudoCount <- function(counts){counts + sqrt((counts*counts)+1)}
+  samples <- as.character(main_metadata[, sample_id])
+  df <- data.frame(samples, covariable)
+  df <- table(df)
+  contig_tab <- t(apply(pseudoCount(df), 1, function(row){row/(sum(row))}))
+  indexes <- colnames(contig_tab)
+  geom_mean <- function(x){exp(mean(log(x)))}
+  # Test using the geometric mean to summarise the entropy distances scores across cell types
+  distance_surprise <- function(p, q){
+    return(geom_mean(abs(p*log2(p/q)))+geom_mean(abs(q*log2(q/p))) )
+  }
+  nPerSample <- table(data.frame(samples))
+  nPerSample <- sqrt(nPerSample)
+  nPerSample[nPerSample==0] <- 10
+  cellCrowd <- nPerSample
+  unique_samples <- unique(samples)
+  n_group_1 = round(length(unique_samples)/2)
+  n_group_2 = length(unique_samples) - n_group_1
+
+  message(paste("Starting montecarlo simulation with n. permutations:",permutations))
+  # for parallelization purposes it is better to split in 2 sub-loops so each thread has (permutation/10) computations
+  entropy_list <- functToApply(seq(100),function(iteration){
+    sapply(seq(permutations/10),function(permutation){
+      group1 <- sample(unique_samples, n_group_1)
+      group2 <- setdiff(unique_samples, group1)
+      cellCrowd_1 <- cellCrowd[group1]
+      cellCrowd_2 <- cellCrowd[group2]
+      cond1 <- lapply(cellCrowd_1, FUN = function(nCellToSample){sample(covariable ,size=nCellToSample)})
+      cond1 <- unname(unlist(cond1))
+      cond2 <- lapply(cellCrowd_2, FUN = function(nCellToSample){sample(covariable, size=nCellToSample)})
+      cond2 <- unname(unlist(cond2))
+      dftmp <- data.frame(covariable=c(cond1, cond2),
+                          groups = c(rep("group1", times=length(cond1)), rep("group2", times=length(cond2))))
+      dftmp <- table(dftmp)
+      if(!all(indexes %in% rownames(dftmp))){
+        tmp <- do.call(rbind, rep(list(rep(0,ncol(dftmp))), sum(!(indexes %in% rownames(dftmp)))))
+        rownames(tmp) <- indexes[!(indexes %in% rownames(dftmp))]
+        dftmp <- rbind(dftmp, tmp)[indexes,]
+      }
+      # dftmp[dftmp == 0] = 1 * instead of using pseudocount 1 use arcsin:
+      # Obtain Frequencies of classes
+      contig_tab_random <- t(apply(pseudoCount(dftmp),2,function(row){row/(sum(row))}))[, indexes]
+      entropy_score <- distance_surprise(contig_tab_random[1,], contig_tab_random[2,])
+    })
+  })
+  # Unpack results
+  null_test_entropy <- unlist(entropy_list)
+  cv <- sd(null_test_entropy) / mean(null_test_entropy) * 100
+  variation="NA"
+  if(cv <= 35){variation="Low"}
+  if(cv > 35 & cv <= 50){variation="Medium"}
+  if(cv > 50){variation="High"}
+  cat("Coefficient of Variation:", round(cv, 2), "%\n")
+  cat("Variation across samples is considered:", variation, "%\n")
+  # Relative IQR (IQR/median)
+  relative_iqr <- IQR(null_test_entropy) / median(null_test_entropy)
+  cat("Relative IQR:", round(relative_iqr, 3), "\n")
+
+  sd_entropies <- sd(null_test_entropy)
+  mean_entropies <- mean(null_test_entropy)
+  median_entropies <- median(null_test_entropy)
+  g.entropies <- ggplot2::ggplot(reshape2::melt(null_test_entropy), ggplot2::aes(y=value, x=factor(1))) +
+    ggbeeswarm::geom_quasirandom(dodge.width = 0.3, varwidth = TRUE, stroke=NA, shape=16,
+                                 colour = "#D5BADB",
+                                 #fill= "#D5BADB"
+                                 alpha = 0.5, size = 1.5) +
+    ggplot2::geom_segment(ggplot2::aes(x = 0.85, y = median_entropies, xend = 1.15, yend = median_entropies),
+                          color="#86608E",linewidth=0.5, alpha=0.3, inherit.aes=FALSE) +
+    ggplot2::theme_classic() +
+    ggplot2::ylim(c(0, 0.6)) +
+    ggplot2::theme(axis.ticks.x = ggplot2::element_blank(), axis.text.x = ggplot2::element_blank()) +
+    ggplot2::xlab("")
+  print(g.entropies)
+}
+
 
 # groups1 <- c(rep("CellA",700),rep("CellB",300),rep("CellC",500),rep("CellD",1000))
 # groups2 <- c(rep("CellA",1700),rep("CellB",350),rep("CellC",550),rep("CellD",800))
