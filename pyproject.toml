@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lotsofcells"
+version = "0.3.0"
+description = "Python port of lotsOfCells: proportion-test statistics and visualization on single-cell metadata. Compatible with scanpy/AnnData and spatial transcriptomics."
+readme = "README.md"
+authors = [
+    { name = "Oscar Gonzalez-Velasco" },
+]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
+    "anndata>=0.9",
+]
+
+[project.optional-dependencies]
+scanpy = ["scanpy>=1.9"]
+spatial = ["spatialdata>=0.1"]
+mudata = ["mudata>=0.2"]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lotsofcells*"]

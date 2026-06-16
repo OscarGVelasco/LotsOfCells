@@ -1,0 +1,211 @@
+"""Internal helpers: metadata extraction and color palette."""
+from __future__ import annotations
+
+from typing import Optional, Sequence, Union
+
+import numpy as np
+import pandas as pd
+
+# Default palette mirrors the R version (alpha 0.95 + slight desaturation).
+_DEFAULT_PALETTE = [
+    "#8DA0CB", "#926F99", "#9FBE8F", "#E8D161", "#DD8080",
+    "#613269", "#B9E8F5", "#CBB8D0", "#F9BE8D", "#B25356",
+    "#519B84", "#B79C76", "#C1D63C", "#F28D35", "#CA4133",
+    "#F0DA88", "#7EAB6F", "#666666", "#3C7DA6", "#4AA147",
+]
+
+
+def _is_anndata(obj) -> bool:
+    """Return True if obj quacks like an AnnData (has .obs)."""
+    try:
+        import anndata  # noqa: F401
+    except Exception:
+        anndata = None  # type: ignore
+    if anndata is not None and isinstance(obj, anndata.AnnData):
+        return True
+    return hasattr(obj, "obs") and isinstance(getattr(obj, "obs"), pd.DataFrame)
+
+
+def _is_spatialdata(obj) -> bool:
+    try:
+        import spatialdata  # type: ignore
+        return isinstance(obj, spatialdata.SpatialData)
+    except Exception:
+        return False
+
+
+def _is_mudata(obj) -> bool:
+    try:
+        import mudata  # type: ignore
+        return isinstance(obj, mudata.MuData)
+    except Exception:
+        return False
+
+
+def get_metadata(sc_object, table: Optional[str] = None) -> pd.DataFrame:
+    """Return a metadata DataFrame from a scanpy/spatial/dataframe object.
+
+    Parameters
+    ----------
+    sc_object
+        One of: ``pandas.DataFrame``, ``anndata.AnnData``, ``mudata.MuData``,
+        or ``spatialdata.SpatialData``. AnnData/Mu/Spatial objects expose their
+        cell-level metadata via ``.obs``; this is the analogue of
+        ``Seurat[[]]`` / ``SingleCellExperiment::colData``.
+    table
+        Only used when ``sc_object`` is a ``SpatialData`` (the name of the
+        table whose ``.obs`` should be returned) or ``MuData`` (the modality
+        name). If ``None`` and the object has a single table/modality, that
+        one is used.
+    """
+    if sc_object is None:
+        raise ValueError("At least an AnnData/SpatialData/DataFrame is required.")
+
+    if isinstance(sc_object, pd.DataFrame):
+        return sc_object.copy()
+
+    if _is_spatialdata(sc_object):
+        tables = dict(sc_object.tables)
+        if not tables:
+            raise ValueError("SpatialData object has no tables.")
+        if table is None:
+            if len(tables) > 1:
+                raise ValueError(
+                    f"SpatialData has multiple tables {list(tables)}; "
+                    "specify `table=...`."
+                )
+            table = next(iter(tables))
+        return tables[table].obs.copy()
+
+    if _is_mudata(sc_object):
+        if table is None:
+            return sc_object.obs.copy()
+        return sc_object[table].obs.copy()
+
+    if _is_anndata(sc_object):
+        return sc_object.obs.copy()
+
+    raise TypeError(
+        "Unsupported object type for metadata extraction. "
+        "Pass a pandas.DataFrame or AnnData/MuData/SpatialData."
+    )
+
+
+def get_numerical_variable(
+    sc_object, numerical_variable: str, metadata: pd.DataFrame
+) -> np.ndarray:
+    """Resolve a numerical variable from .obs OR feature counts (gene name).
+
+    Mirrors the R behaviour of `density_chart`: if the column is in
+    metadata, return it; otherwise look for a feature in the AnnData and
+    return its expression vector aligned to ``metadata.index``.
+    """
+    if numerical_variable in metadata.columns:
+        return metadata[numerical_variable].to_numpy()
+
+    if _is_anndata(sc_object):
+        adata = sc_object
+        if numerical_variable in adata.var_names:
+            idx = adata.var_names.get_loc(numerical_variable)
+            X = adata.X
+            col = X[:, idx]
+            if hasattr(col, "toarray"):
+                col = col.toarray().ravel()
+            else:
+                col = np.asarray(col).ravel()
+            # Align to metadata row order
+            obs_idx = metadata.index
+            full = pd.Series(col, index=adata.obs_names)
+            return full.loc[obs_idx].to_numpy()
+
+    raise ValueError(
+        f"Variable '{numerical_variable}' not found in metadata columns "
+        "or feature names."
+    )
+
+
+def get_palette(
+    use_palette: Optional[Sequence[str]] = None, n_colors: int = 20
+) -> list:
+    """Return a list of `n_colors` colors.
+
+    If `use_palette` is None, the default lotsOfCells palette is used.
+    If more colors than provided are requested, a linear interpolation in RGB
+    space (analogue of `colorRampPalette`) is performed.
+    """
+    base = list(use_palette) if use_palette is not None else list(_DEFAULT_PALETTE)
+    if n_colors <= len(base):
+        return base[:n_colors]
+    return _ramp_palette(base, n_colors)
+
+
+def _hex_to_rgb(h: str) -> np.ndarray:
+    h = h.lstrip("#")
+    return np.array([int(h[i : i + 2], 16) for i in (0, 2, 4)], dtype=float) / 255.0
+
+
+def _rgb_to_hex(rgb: Union[np.ndarray, Sequence[float]]) -> str:
+    rgb = np.clip(np.asarray(rgb), 0, 1)
+    return "#{:02X}{:02X}{:02X}".format(*(int(round(c * 255)) for c in rgb))
+
+
+def _ramp_palette(colors: Sequence[str], n: int) -> list:
+    """Equivalent of grDevices::colorRampPalette in linear RGB."""
+    rgbs = np.stack([_hex_to_rgb(c) for c in colors])  # (k, 3)
+    if n == 1:
+        return [_rgb_to_hex(rgbs[0])]
+    src = np.linspace(0, 1, len(colors))
+    tgt = np.linspace(0, 1, n)
+    interp = np.stack(
+        [np.interp(tgt, src, rgbs[:, c]) for c in range(3)], axis=1
+    )
+    return [_rgb_to_hex(rgb) for rgb in interp]
+
+
+def lighten(color: str, amount: float = 0.2) -> str:
+    """Lighten an HSV-based color by `amount` (0..1). Analogue of colorspace::lighten."""
+    import colorsys
+
+    r, g, b = _hex_to_rgb(color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    l = l + amount * (1 - l)
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return _rgb_to_hex((r, g, b))
+
+
+def darken(color: str, amount: float = 0.2) -> str:
+    """Darken color by `amount` (0..1). Analogue of colorspace::darken."""
+    import colorsys
+
+    r, g, b = _hex_to_rgb(color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    l = l * (1 - amount)
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return _rgb_to_hex((r, g, b))
+
+
+def desaturate(color: str, amount: float = 0.16) -> str:
+    """Reduce saturation. Analogue of colorspace::desaturate."""
+    import colorsys
+
+    r, g, b = _hex_to_rgb(color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    s = max(0.0, s * (1 - amount))
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return _rgb_to_hex((r, g, b))
+
+
+def save_to_pdf(fig, pdf_file: Optional[str]) -> None:
+    """Save a matplotlib Figure to PDF if `pdf_file` is provided.
+
+    Used by every plotting function when the user passes ``pdf_file=...``.
+    Uses ``bbox_inches="tight"`` so that legends placed outside the axes
+    are included and not clipped.
+    """
+    if pdf_file is None:
+        return
+    if fig is None:
+        import matplotlib.pyplot as plt
+
+        fig = plt.gcf()
+    fig.savefig(pdf_file, format="pdf", bbox_inches="tight")
