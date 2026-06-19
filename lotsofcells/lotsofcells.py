@@ -83,6 +83,34 @@ def lots_of_cells(
     metadata = get_metadata(sc_object, table=table)
 
     main_vals = metadata[main_variable].astype(str).to_numpy()
+
+    if isinstance(label_order[0], list) or isinstance(label_order[1], list):
+        if verbose:
+            print(f"Multiple sub-groups detected.")
+        # If several levels, process:
+        flat_order = np.array([a for b in label_order for a in b]).astype(str)
+        group_1 = np.array(label_order[0]).astype(str)
+        group_2 = np.array(label_order[1]).astype(str)
+        # Clean data with unwanted levels:
+        mask = np.isin(main_vals, flat_order)
+        metadata = metadata.loc[mask].copy()
+
+        # Obtain group labels:
+        mask_g1 = np.isin(main_vals, group_1)
+        mask_g2 = np.isin(main_vals, group_2)
+        # Define new labels:
+        label_1 = "loc_group_one [" + " ".join(group_1)+"]"
+        label_2 = "loc_group_two [" + " ".join(group_2)+"]"
+        # Create synthetic labels:
+        metadata.loc[mask_g1,"loc_tmp_group"] = label_1
+        metadata.loc[mask_g2,"loc_tmp_group"] = label_2
+        # relevel and recompute
+        main_variable = "loc_tmp_group"
+        main_vals = metadata[main_variable].astype(str).to_numpy()
+        # Copy original and push new:
+        label_order_original = label_order
+        label_order = [label_1, label_2]
+
     if not all(l in np.unique(main_vals) for l in label_order):
         missing = [l for l in label_order if l not in np.unique(main_vals)]
         raise ValueError(f"Some groups in label_order not found in data: {missing}")

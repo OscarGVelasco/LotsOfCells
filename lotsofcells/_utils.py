@@ -6,12 +6,14 @@ from typing import Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
-# Default palette mirrors the R version (alpha 0.95 + slight desaturation).
+# Default categorical palette — scanpy `default_20` (Vega-20 with
+# yellow/green hues swapped for higher contrast). The de facto standard in
+# the single-cell community, so colours feel native to scanpy figures.
 _DEFAULT_PALETTE = [
-    "#8DA0CB", "#926F99", "#9FBE8F", "#E8D161", "#DD8080",
-    "#613269", "#B9E8F5", "#CBB8D0", "#F9BE8D", "#B25356",
-    "#519B84", "#B79C76", "#C1D63C", "#F28D35", "#CA4133",
-    "#F0DA88", "#7EAB6F", "#666666", "#3C7DA6", "#4AA147",
+    "#1F77B4", "#FF7F0E", "#279E68", "#D62728", "#AA40FC",
+    "#8C564B", "#E377C2", "#B5BD61", "#17BECF", "#AEC7E8",
+    "#FFBB78", "#98DF8A", "#FF9896", "#C5B0D5", "#C49C94",
+    "#F7B6D2", "#DBDB8D", "#9EDAE5", "#AD494A", "#8C6D31",
 ]
 
 
