@@ -94,6 +94,8 @@ def lots_of_cells(
         # Clean data with unwanted levels:
         mask = np.isin(main_vals, flat_order)
         metadata = metadata.loc[mask].copy()
+        # Update target labels:
+        main_vals = metadata[main_variable].astype(str).to_numpy()
 
         # Obtain group labels:
         mask_g1 = np.isin(main_vals, group_1)

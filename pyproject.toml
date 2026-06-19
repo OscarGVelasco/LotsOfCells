@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lotsofcells"
-version = "0.4.1"
+dynamic = ["version"]
 description = "Python port of lotsOfCells: proportion-test statistics and visualization on single-cell metadata. Compatible with scanpy/AnnData and spatial transcriptomics."
 readme = "README.md"
 authors = [
