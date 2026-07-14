@@ -14,6 +14,11 @@ https://doi.org/10.1101/2024.05.23.595582
 from ._utils import get_metadata, get_palette
 from .lotsofcells import lots_of_cells
 from .entropy import entropy_score
+from .gene_source import (
+    gene_source_score,
+    gene_source_bar_chart,
+    gene_source_boxplot,
+)
 from .plots import (
     bar_chart,
     waffle_chart,
@@ -28,6 +33,9 @@ __all__ = [
     "get_palette",
     "lots_of_cells",
     "entropy_score",
+    "gene_source_score",
+    "gene_source_bar_chart",
+    "gene_source_boxplot",
     "bar_chart",
     "waffle_chart",
     "polar_chart",

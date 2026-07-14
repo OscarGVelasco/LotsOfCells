@@ -6,6 +6,7 @@ from typing import Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from ._parallel import run_permutations
 from ._stats import (
     _proportions_from_table,
     _table,
@@ -43,6 +44,7 @@ def lots_of_cells(
     sample_id: Optional[str] = None,
     permutations: int = 1000,
     seed: Optional[int] = None,
+    n_cores: Optional[int] = None,
     table: Optional[str] = None,
     plot: bool = True,
     verbose: bool = True,
@@ -122,7 +124,6 @@ def lots_of_cells(
     groups = metadata[main_variable].astype(str).to_numpy()
     covariable = metadata[subtype_variable].astype(str).to_numpy()
 
-    rng = np.random.default_rng(seed)
     min_cells = 10
 
     if len(label_order) < 2:
@@ -130,7 +131,8 @@ def lots_of_cells(
 
     if len(label_order) > 2:
         return _gamma_path(
-            covariable, groups, label_order, permutations, min_cells, rng, verbose
+            covariable, groups, label_order, permutations, min_cells,
+            seed, n_cores, verbose,
         )
 
     return _montecarlo_path(
@@ -143,7 +145,8 @@ def lots_of_cells(
         subtype_variable,
         permutations,
         min_cells,
-        rng,
+        seed,
+        n_cores,
         verbose,
         plot,
         pdf_file,
@@ -162,11 +165,17 @@ def _montecarlo_path(
     subtype_variable,
     permutations,
     min_cells,
-    rng,
+    seed,
+    n_cores,
     verbose,
     plot,
     pdf_file=None,
 ):
+    # Local rng for the deterministic (non-permutation) synthetic-sample
+    # step. The permutation loop below uses run_permutations with its own
+    # SeedSequence chunking.
+    rng = np.random.default_rng(seed)
+
     if verbose:
         print(f"Only 2 groups detected. Computing FC for {label_order[0]} vs {label_order[1]}")
 
@@ -224,14 +233,28 @@ def _montecarlo_path(
     if verbose:
         print("- Starting Monte-Carlo simulation of fold changes")
 
-    null_fcs = np.empty((permutations, len(indexes)))
-    real_fcs = np.empty((permutations, len(indexes)))
-    for i in range(permutations):
-        m, o = cell_to_montecarlo(
-            covariable_synth, groups_synth, label_order, indexes, cell_crowd, rng
-        )
-        null_fcs[i] = m
-        real_fcs[i] = o
+    def _perm_chunk(chunk_size, seed_seq):
+        # Each worker's own rng, seeded independently → deterministic across
+        # any n_cores value for the same base `seed`.
+        chunk_rng = np.random.default_rng(seed_seq)
+        # Stack null and real together so run_permutations concat works;
+        # shape is (chunk_size, 2, n_indexes). We unpack after the join.
+        out = np.empty((chunk_size, 2, len(indexes)))
+        for k in range(chunk_size):
+            m, o = cell_to_montecarlo(
+                covariable_synth, groups_synth, label_order, indexes,
+                cell_crowd, chunk_rng,
+            )
+            out[k, 0] = m
+            out[k, 1] = o
+        return out
+
+    stacked = run_permutations(
+        _perm_chunk, permutations,
+        n_cores=n_cores, seed=seed, verbose=verbose,
+    )
+    null_fcs = stacked[:, 0, :]
+    real_fcs = stacked[:, 1, :]
 
     higher = (np.sum(null_fcs >= obs_fc, axis=0) + 1) / (permutations + 1)
     lower = (np.sum(null_fcs <= obs_fc, axis=0) + 1) / (permutations + 1)
@@ -279,12 +302,20 @@ def _montecarlo_path(
 
 # --- >2-condition Goodman-Kruskal gamma path -----------------------------------------
 
-def _gamma_path(covariable, groups, label_order, permutations, min_cells, rng, verbose):
+def _gamma_path(
+    covariable, groups, label_order, permutations, min_cells,
+    seed, n_cores, verbose,
+):
     if verbose:
         print(
             "More than 2 groups detected. Computing Goodman-Kruskal gamma rank "
             f"correlation in order: {' vs '.join(label_order)}"
         )
+
+    # Local rng for the small (fixed-size) CI-subsample loop, which stays
+    # serial. The two big permutation loops use run_permutations with their
+    # own SeedSequence chunking so results are reproducible for any n_cores.
+    rng = np.random.default_rng(seed)
 
     counts_per_group = pd.Series(groups).value_counts().to_dict()
     cell_crowd = {
@@ -297,18 +328,31 @@ def _gamma_path(covariable, groups, label_order, permutations, min_cells, rng, v
     obs_tab = _table(groups, covariable)
     indexes = list(obs_tab.columns)
 
-    # Observed gamma: aggregate over `permutations` subsamplings of the original data
-    nc_orig = np.zeros(len(indexes))
-    nd_orig = np.zeros(len(indexes))
-    for _ in range(permutations):
-        nc, nd = cell_to_gamma_original(
-            covariable, groups, label_order, indexes, cell_crowd, rank_index, rng
-        )
-        nc_orig += nc
-        nd_orig += nd
+    # --- Observed gamma: aggregate over `permutations` subsamplings of the
+    # original data. Chunk returns per-permutation (nc, nd), summed after
+    # the join.
+    def _obs_chunk(chunk_size, seed_seq):
+        r = np.random.default_rng(seed_seq)
+        out = np.empty((chunk_size, 2, len(indexes)))
+        for k in range(chunk_size):
+            nc, nd = cell_to_gamma_original(
+                covariable, groups, label_order, indexes, cell_crowd,
+                rank_index, r,
+            )
+            out[k, 0] = nc
+            out[k, 1] = nd
+        return out
+
+    obs_stack = run_permutations(
+        _obs_chunk, permutations,
+        n_cores=n_cores, seed=seed, verbose=verbose,
+    )
+    nc_orig = obs_stack[:, 0, :].sum(axis=0)
+    nd_orig = obs_stack[:, 1, :].sum(axis=0)
     obs_gamma = _gamma_godkrus(nc_orig, nd_orig, kendall_denom * permutations)
 
-    # Confidence interval via 10 sub-samples of size 100
+    # --- CI: 10 sub-samples × 100 aggregations each. Fixed cost — stays
+    # serial; parallel dispatch would add more overhead than it saves.
     sub_gammas = np.empty((10, len(indexes)))
     for s in range(10):
         nc_s = np.zeros(len(indexes))
@@ -326,18 +370,33 @@ def _gamma_path(covariable, groups, label_order, permutations, min_cells, rng, v
     if verbose:
         print("- Starting gamma rank permutation analysis, this can take a while...")
 
+    # --- Null distribution: `permutations` outer × 10 inner. Each outer
+    # iteration returns one gamma vector; chunk returns (chunk_size, k).
     n_random_observations = 10
-    null_gamma = np.empty((permutations, len(indexes)))
-    for p in range(permutations):
-        nc_p = np.zeros(len(indexes))
-        nd_p = np.zeros(len(indexes))
-        for _ in range(n_random_observations):
-            nc, nd = cell_to_gamma(
-                covariable, groups, label_order, indexes, cell_crowd, rank_index, rng
-            )
-            nc_p += nc
-            nd_p += nd
-        null_gamma[p] = _gamma_godkrus(nc_p, nd_p, kendall_denom * n_random_observations)
+
+    def _null_chunk(chunk_size, seed_seq):
+        r = np.random.default_rng(seed_seq)
+        out = np.empty((chunk_size, len(indexes)))
+        for k in range(chunk_size):
+            nc_p = np.zeros(len(indexes))
+            nd_p = np.zeros(len(indexes))
+            for _ in range(n_random_observations):
+                nc, nd = cell_to_gamma(
+                    covariable, groups, label_order, indexes, cell_crowd,
+                    rank_index, r,
+                )
+                nc_p += nc
+                nd_p += nd
+            out[k] = _gamma_godkrus(nc_p, nd_p, kendall_denom * n_random_observations)
+        return out
+
+    # Use a different-but-deterministic seed for the null so it's not
+    # correlated with the observed pass.
+    null_seed = None if seed is None else int(seed) + 1
+    null_gamma = run_permutations(
+        _null_chunk, permutations,
+        n_cores=n_cores, seed=null_seed, verbose=verbose,
+    )
 
     with np.errstate(invalid="ignore"):
         higher = np.sum(null_gamma >= obs_gamma, axis=0) / permutations

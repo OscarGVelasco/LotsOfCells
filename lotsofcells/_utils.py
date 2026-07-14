@@ -94,13 +94,22 @@ def get_metadata(sc_object, table: Optional[str] = None) -> pd.DataFrame:
 
 
 def get_numerical_variable(
-    sc_object, numerical_variable: str, metadata: pd.DataFrame
+    sc_object, numerical_variable: str, metadata: pd.DataFrame,
+    layer: Optional[str] = None,
 ) -> np.ndarray:
     """Resolve a numerical variable from .obs OR feature counts (gene name).
 
     Mirrors the R behaviour of `density_chart`: if the column is in
     metadata, return it; otherwise look for a feature in the AnnData and
     return its expression vector aligned to ``metadata.index``.
+
+    Parameters
+    ----------
+    layer
+        For AnnData objects, pull the gene column from
+        ``adata.layers[layer]`` instead of ``adata.X``. Useful when ``.X``
+        is normalised but you need raw counts (e.g. for the gene-source
+        contribution test).
     """
     if numerical_variable in metadata.columns:
         return metadata[numerical_variable].to_numpy()
@@ -109,7 +118,15 @@ def get_numerical_variable(
         adata = sc_object
         if numerical_variable in adata.var_names:
             idx = adata.var_names.get_loc(numerical_variable)
-            X = adata.X
+            if layer is not None:
+                if layer not in adata.layers:
+                    raise ValueError(
+                        f"Layer '{layer}' not found in adata.layers "
+                        f"(available: {list(adata.layers.keys())})"
+                    )
+                X = adata.layers[layer]
+            else:
+                X = adata.X
             col = X[:, idx]
             if hasattr(col, "toarray"):
                 col = col.toarray().ravel()

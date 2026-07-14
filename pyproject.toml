@@ -18,6 +18,7 @@ dependencies = [
     "scipy>=1.9",
     "matplotlib>=3.6",
     "anndata>=0.9",
+    "joblib>=1.2",
 ]
 
 [project.optional-dependencies]

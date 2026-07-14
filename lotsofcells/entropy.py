@@ -6,6 +6,7 @@ from typing import Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from ._parallel import run_permutations
 from ._stats import (
     _ensure_cols,
     _ensure_rows,
@@ -48,6 +49,7 @@ def entropy_score(
     sample_id: Optional[str] = None,
     permutations: int = 1000,
     seed: Optional[int] = None,
+    n_cores: Optional[int] = None,
     table: Optional[str] = None,
     plot: bool = True,
     verbose: bool = True,
@@ -73,7 +75,6 @@ def entropy_score(
     metadata = metadata.loc[np.isin(main_vals, list(label_order))].copy()
     groups = metadata[main_variable].astype(str).to_numpy()
     covariable = metadata[subtype_variable].astype(str).to_numpy()
-    rng = np.random.default_rng(seed)
 
     if len(label_order) == 0:
         raise ValueError("label_order must be specified.")
@@ -86,7 +87,8 @@ def entropy_score(
             sample_id,
             covariable,
             permutations,
-            rng,
+            seed=seed,
+            n_cores=n_cores,
             plot=plot,
             verbose=verbose,
             pdf_file=pdf_file,
@@ -139,25 +141,33 @@ def entropy_score(
     if verbose:
         print(f"Starting Monte-Carlo simulation with n. permutations: {permutations}")
 
-    null_scores = np.empty(permutations)
-    for i in range(permutations):
-        pieces_cov, pieces_grp = [], []
-        for label in label_order:
-            crowd = cell_crowd[label]
-            if isinstance(crowd, list):
-                for n in crowd:
-                    s = rng.choice(covariable, size=int(n), replace=True)
+    def _perm_chunk(chunk_size, seed_seq):
+        rng = np.random.default_rng(seed_seq)
+        out = np.empty((chunk_size, 1))
+        for i in range(chunk_size):
+            pieces_cov, pieces_grp = [], []
+            for label in label_order:
+                crowd = cell_crowd[label]
+                if isinstance(crowd, list):
+                    for n in crowd:
+                        s = rng.choice(covariable, size=int(n), replace=True)
+                        pieces_cov.append(s)
+                        pieces_grp.append(np.repeat(label, len(s)))
+                else:
+                    s = rng.choice(covariable, size=int(crowd), replace=True)
                     pieces_cov.append(s)
                     pieces_grp.append(np.repeat(label, len(s)))
-            else:
-                s = rng.choice(covariable, size=int(crowd), replace=True)
-                pieces_cov.append(s)
-                pieces_grp.append(np.repeat(label, len(s)))
-        cov = np.concatenate(pieces_cov)
-        grp = np.concatenate(pieces_grp)
-        rand_tab = _table(grp, cov)
-        p = _proportions_arcsin(rand_tab, label_order, indexes)
-        null_scores[i] = _distance_surprise(p[0], p[1])
+            cov = np.concatenate(pieces_cov)
+            grp = np.concatenate(pieces_grp)
+            rand_tab = _table(grp, cov)
+            p = _proportions_arcsin(rand_tab, label_order, indexes)
+            out[i, 0] = _distance_surprise(p[0], p[1])
+        return out
+
+    null_scores = run_permutations(
+        _perm_chunk, permutations,
+        n_cores=n_cores, seed=seed, verbose=verbose,
+    )[:, 0]
 
     p_val = float((null_scores >= obs_score).sum() / permutations)
 
@@ -225,7 +235,8 @@ def _one_class_test(
     sample_id,
     covariable,
     permutations,
-    rng,
+    seed=None,
+    n_cores=None,
     plot=True,
     verbose=True,
     pdf_file=None,
@@ -265,36 +276,44 @@ def _one_class_test(
 
     # Mirror R's iteration count: seq(100) * seq(permutations/10) = 10*perms.
     n_iter = max(int(permutations) * 10, 100)
-    null_scores = np.empty(n_iter)
     if verbose:
         print(f"Starting 1-class Monte-Carlo simulation: {n_iter} iterations")
 
-    for i in range(n_iter):
-        perm = rng.permutation(len(unique_samples))
-        g1 = [unique_samples[k] for k in perm[:n_g1]]
-        g2 = [unique_samples[k] for k in perm[n_g1:]]
-        pieces_cov, pieces_grp = [], []
-        for s in g1:
-            n = max(int(cell_crowd[s]), 1)
-            pool = sample_pools[s]
-            if len(pool) == 0:
-                continue
-            draw = rng.choice(pool, size=n, replace=True)
-            pieces_cov.append(draw)
-            pieces_grp.append(np.repeat("group1", n))
-        for s in g2:
-            n = max(int(cell_crowd[s]), 1)
-            pool = sample_pools[s]
-            if len(pool) == 0:
-                continue
-            draw = rng.choice(pool, size=n, replace=True)
-            pieces_cov.append(draw)
-            pieces_grp.append(np.repeat("group2", n))
-        cov = np.concatenate(pieces_cov)
-        grp = np.concatenate(pieces_grp)
-        rand_tab = _table(grp, cov)
-        p = _proportions_arcsin(rand_tab, ["group1", "group2"], indexes)
-        null_scores[i] = _distance_surprise(p[0], p[1])
+    def _perm_chunk(chunk_size, seed_seq):
+        rng = np.random.default_rng(seed_seq)
+        out = np.empty((chunk_size, 1))
+        for i in range(chunk_size):
+            perm = rng.permutation(len(unique_samples))
+            g1 = [unique_samples[k] for k in perm[:n_g1]]
+            g2 = [unique_samples[k] for k in perm[n_g1:]]
+            pieces_cov, pieces_grp = [], []
+            for s in g1:
+                n = max(int(cell_crowd[s]), 1)
+                pool = sample_pools[s]
+                if len(pool) == 0:
+                    continue
+                draw = rng.choice(pool, size=n, replace=True)
+                pieces_cov.append(draw)
+                pieces_grp.append(np.repeat("group1", n))
+            for s in g2:
+                n = max(int(cell_crowd[s]), 1)
+                pool = sample_pools[s]
+                if len(pool) == 0:
+                    continue
+                draw = rng.choice(pool, size=n, replace=True)
+                pieces_cov.append(draw)
+                pieces_grp.append(np.repeat("group2", n))
+            cov = np.concatenate(pieces_cov)
+            grp = np.concatenate(pieces_grp)
+            rand_tab = _table(grp, cov)
+            p = _proportions_arcsin(rand_tab, ["group1", "group2"], indexes)
+            out[i, 0] = _distance_surprise(p[0], p[1])
+        return out
+
+    null_scores = run_permutations(
+        _perm_chunk, n_iter,
+        n_cores=n_cores, seed=seed, verbose=verbose,
+    )[:, 0]
 
     mean_null = float(null_scores.mean())
     sd_null = float(null_scores.std(ddof=1))
@@ -325,7 +344,8 @@ def _one_class_test(
             from ._utils import save_to_pdf
 
             fig, ax = plt.subplots(figsize=(3.5, 5))
-            jitter = rng.uniform(-0.1, 0.1, size=len(null_scores))
+            jitter_rng = np.random.default_rng(seed if seed is not None else 0)
+            jitter = jitter_rng.uniform(-0.1, 0.1, size=len(null_scores))
             ax.scatter(jitter, null_scores, color="#D5BADB", alpha=0.5, s=15)
             ax.axhline(median_null, color="#86608E", lw=1)
             ax.set_xlim(-0.5, 0.5)

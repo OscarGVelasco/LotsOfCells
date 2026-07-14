@@ -54,6 +54,11 @@ def bar_chart(
     palette = get_palette(use_palette=colors, n_colors=len(order))
     color_map = dict(zip(order[::-1], palette))  # largest avg → first color
 
+    # Use the ASCII Unit Separator (0x1F) between group and sample rather
+    # than "_", so we can safely recover the main-group name by lookup
+    # instead of splitting. `_` is common in real-world main_variable and
+    # sample_id values.
+    SEP = "\x1f"
     if sample_id is not None:
         samples = metadata[sample_id].astype(str)
         if contribution:
@@ -62,12 +67,15 @@ def bar_chart(
                 main_variable, subtype_variable, sample_id, figsize,
                 pdf_file=pdf_file,
             )
-        bar_keys = (groups + "_" + samples).to_numpy()
-        df = pd.DataFrame({"groups": bar_keys, "covariable": covariable.values})
+        composite_keys = (groups + SEP + samples).to_numpy()
+        # key → main-group and key → human-readable display, both by lookup
+        key_to_main = dict(zip(composite_keys, groups.values))
+        df = pd.DataFrame({"groups": composite_keys, "covariable": covariable.values})
         labels_main = groups
     else:
         df = pd.DataFrame({"groups": groups.values, "covariable": covariable.values})
         labels_main = groups
+        key_to_main = {}  # filled after crosstab
 
     contig = pd.crosstab(df["groups"], df["covariable"])
     contig = contig.div(contig.sum(axis=1), axis=0)
@@ -77,9 +85,12 @@ def bar_chart(
     # Order bars within main group by descending value of largest covariable
     bar_keys = list(contig.index)
     if sample_id is not None:
-        bar_main = [k.split("_")[0] for k in bar_keys]
+        bar_main = [key_to_main[k] for k in bar_keys]
+        key_to_display = {k: k.replace(SEP, " · ") for k in bar_keys}
     else:
         bar_main = bar_keys
+        key_to_main = {k: k for k in bar_keys}
+        key_to_display = {k: k for k in bar_keys}
     main_levels = sorted(set(bar_main))
 
     if subtype_only is None:
@@ -89,13 +100,10 @@ def bar_chart(
     sort_vals = contig[sort_col]
     bar_order = sorted(
         bar_keys,
-        key=lambda k: (
-            main_levels.index(k.split("_")[0] if sample_id is not None else k),
-            -sort_vals[k],
-        ),
+        key=lambda k: (main_levels.index(key_to_main[k]), -sort_vals[k]),
     )
     contig = contig.loc[bar_order]
-    bar_main = [k.split("_")[0] if sample_id is not None else k for k in bar_order]
+    bar_main = [key_to_main[k] for k in bar_order]
 
     # Plot
     if ax is None:
@@ -126,7 +134,9 @@ def bar_chart(
         ax.legend(title=f"Class: {subtype_variable}", bbox_to_anchor=(1.02, 1), loc="upper left")
 
     ax.set_xticks(range(len(contig)))
-    ax.set_xticklabels(contig.index, rotation=45, ha="right")
+    ax.set_xticklabels(
+        [key_to_display[k] for k in contig.index], rotation=45, ha="right"
+    )
     ax.set_ylabel("percentage")
     ax.set_yticks(np.linspace(0, 1, 11))
     ax.set_yticklabels([f"{int(100 * v)}" for v in np.linspace(0, 1, 11)])
@@ -263,10 +273,18 @@ def waffle_chart(
         order = list(covariable.value_counts(ascending=False).index)[::-1]
         subtype_palette = None
 
+    # ASCII Unit Separator between group and sample so the main-group
+    # name can be recovered by lookup instead of splitting on "_".
+    SEP = "\x1f"
     if sample_id is not None:
-        keys = (groups + "_" + metadata[sample_id].astype(str)).to_numpy()
+        samples_str = metadata[sample_id].astype(str)
+        keys = (groups + SEP + samples_str).to_numpy()
+        key_to_main = dict(zip(keys, groups.values))
+        key_to_display = {k: k.replace(SEP, " · ") for k in np.unique(keys)}
     else:
         keys = groups.to_numpy()
+        key_to_main = {k: k for k in np.unique(keys)}
+        key_to_display = {k: k for k in np.unique(keys)}
 
     df = pd.DataFrame({"groups": keys, "covariable": cov})
     contig = pd.crosstab(df["groups"], df["covariable"])
@@ -305,8 +323,7 @@ def waffle_chart(
     legend_ax.axis("off")
 
     # Map main groups → color pair indices for subtype_only mode
-    main_order = sorted({k.split("_")[0] if sample_id is not None else k
-                         for k in contig.index})
+    main_order = sorted({key_to_main[k] for k in contig.index})
     main_idx = {m: i for i, m in enumerate(main_order)}
 
     i = -1
@@ -315,13 +332,16 @@ def waffle_chart(
         percentages = (row * 100).round().astype(int).to_numpy()
         percentages = _balance_to_100(percentages)
         if subtype_only is not None:
-            mg = gname.split("_")[0] if sample_id is not None else gname
+            mg = key_to_main[gname]
             pi = main_idx[mg] * 2
             colors_panel = [palette[pi % len(palette)],
                             palette[(pi + 1) % len(palette)]]
         else:
             colors_panel = [palette[order.index(o)] for o in order]
-        _draw_waffle(ax, percentages, colors_panel, order, gname, ncells.get(gname, 0))
+        _draw_waffle(
+            ax, percentages, colors_panel, order,
+            key_to_display[gname], ncells.get(gname, 0),
+        )
         if subtype_only is not None and len(percentages) >= 1:
             ax.text(4.5, 8, f"{percentages[0]:.0f}%",
                     ha="center", va="center", fontsize=11,
@@ -426,10 +446,18 @@ def polar_chart(
     palette = get_palette(use_palette=colors, n_colors=len(order))
     color_map = dict(zip(order[::-1], palette))
 
+    # ASCII Unit Separator between group and sample so we don't have to
+    # split composite keys on "_" (which occurs freely in real data).
+    SEP = "\x1f"
     if sample_id is not None:
-        keys = (groups + "_" + metadata[sample_id].astype(str)).to_numpy()
+        samples_str = metadata[sample_id].astype(str)
+        keys = (groups + SEP + samples_str).to_numpy()
+        key_to_main = dict(zip(keys, groups.values))
+        key_to_display = {k: k.replace(SEP, " · ") for k in np.unique(keys)}
     else:
         keys = groups.to_numpy()
+        key_to_main = {k: k for k in np.unique(keys)}
+        key_to_display = {k: k for k in np.unique(keys)}
     df = pd.DataFrame({"groups": keys, "covariable": covariable.values})
     contig = pd.crosstab(df["groups"], df["covariable"])
     if subtype_only is not None:
@@ -437,9 +465,9 @@ def polar_chart(
 
     # Sort by main_group then preserve order
     if sample_id is not None:
-        main_levels = sorted({k.split("_")[0] for k in contig.index})
+        main_levels = sorted({key_to_main[k] for k in contig.index})
         contig = contig.reindex(
-            sorted(contig.index, key=lambda k: (main_levels.index(k.split("_")[0]), k))
+            sorted(contig.index, key=lambda k: (main_levels.index(key_to_main[k]), k))
         )
     else:
         contig = contig.sort_index()
@@ -463,7 +491,7 @@ def polar_chart(
         bottom += vals
 
     ax.set_xticks(angles)
-    ax.set_xticklabels(contig.index, fontsize=7)
+    ax.set_xticklabels([key_to_display[k] for k in contig.index], fontsize=7)
     ax.set_yticklabels([])
     ax.set_title(f"Proportions of {subtype_variable} by {main_variable}",
                  fontsize=14, fontweight="bold")
@@ -507,23 +535,44 @@ def density_chart(
     metadata = metadata.assign(_val=values)
     metadata = metadata.dropna(subset=["_val"])
 
+    # Compose display labels with a delimiter that CANNOT appear in the
+    # source columns. `_` is common in cell-type / sample IDs
+    # (Invasive_Tumor, DCIS_1, Myoepi_KRT15+, roi_00...), so splitting on
+    # it to recover the covariable name breaks. We use the ASCII Unit
+    # Separator (0x1F) — guaranteed not to appear in real labels — as the
+    # internal key delimiter and keep a human-readable version for the
+    # y-axis.
+    SEP = "\x1f"
     if sample_id is not None:
-        sub_label = (covariable + "_" + groups + "_" + metadata[sample_id].astype(str))
+        sub_label_key = (
+            covariable + SEP + groups + SEP + metadata[sample_id].astype(str)
+        )
+        sub_label_display = (
+            covariable + " · " + groups + " · " + metadata[sample_id].astype(str)
+        )
     else:
-        sub_label = covariable + "_" + groups
+        sub_label_key = covariable + SEP + groups
+        sub_label_display = covariable + " · " + groups
 
     levels = []
+    label_to_cov = {}
+    label_to_display = {}
     for o in order:
-        sub_levels = sorted(sub_label[covariable == o].unique())
-        levels.extend(sub_levels)
-    metadata = metadata.assign(_label=sub_label)
+        pairs = sorted(
+            set(zip(sub_label_key[covariable == o], sub_label_display[covariable == o]))
+        )
+        for k, d in pairs:
+            levels.append(k)
+            label_to_cov[k] = o
+            label_to_display[k] = d
+    metadata = metadata.assign(_label=sub_label_key)
     metadata["_label"] = pd.Categorical(metadata["_label"], categories=levels, ordered=True)
 
     fig, ax = plt.subplots(figsize=figsize)
     overlap = 0.7
     y = 0
     for label in levels:
-        cov_name = label.split("_")[0]
+        cov_name = label_to_cov[label]
         color = color_map[cov_name]
         vals = metadata.loc[metadata["_label"] == label, "_val"].to_numpy()
         if len(vals) < 2:
@@ -544,7 +593,7 @@ def density_chart(
         y += 1
 
     ax.set_yticks(np.arange(len(levels)) + 0.3)
-    ax.set_yticklabels(levels, fontsize=8)
+    ax.set_yticklabels([label_to_display[l] for l in levels], fontsize=8)
     ax.set_xlabel(numerical_variable)
     title = f"Density distribution of {numerical_variable} across {subtype_variable}"
     if sample_id:
