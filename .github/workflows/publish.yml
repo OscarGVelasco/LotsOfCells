@@ -22,6 +22,8 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # setuptools-scm needs full history + tags
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -48,6 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # setuptools-scm needs full history + tags
 
       - uses: actions/setup-python@v5
         with:
@@ -58,8 +62,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install build
 
+      - name: Show resolved version
+        run: |
+          pip install setuptools-scm
+          echo "Tag on this ref: $(git describe --tags --abbrev=0 2>/dev/null || echo none)"
+          echo "setuptools-scm sees: $(python -m setuptools_scm)"
+
       - name: Build sdist + wheel
         run: python -m build
+
+      - name: Show built filenames
+        run: ls -la dist/
+
+      - name: Fail if version is 0.0.0
+        run: |
+          if ls dist/lotsofcells-0.0.0* 1> /dev/null 2>&1; then
+            echo "::error::Version resolved to 0.0.0 — setuptools-scm did not see any tag."
+            echo "Check (a) the [tool.setuptools_scm] section exists in pyproject.toml"
+            echo "and (b) actions/checkout uses fetch-depth: 0."
+            exit 1
+          fi
 
       - name: Check distributions
         run: |
@@ -109,6 +131,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # setuptools-scm needs full history + tags
 
       - name: Download distributions
         uses: actions/download-artifact@v4

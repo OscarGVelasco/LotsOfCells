@@ -30,3 +30,8 @@ dev = ["pytest>=7"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lotsofcells*"]
+
+# setuptools-scm reads the version from the latest git tag.
+# The section MUST exist (even if empty) — otherwise setuptools-scm stays
+# dormant and the build falls back to "0.0.0". Tags must be like "v0.4.0".
+[tool.setuptools_scm]
