@@ -6,3 +6,5 @@
 lotOfCells.Rproj
 LotOfCells.Rproj
 __pycache__/
+lotsofcells/__pycache__/
+tests/
