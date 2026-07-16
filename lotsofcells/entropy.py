@@ -41,7 +41,7 @@ def _proportions_arcsin(
 #    return geom_mean(np.abs(p * np.log2(p / q))) + geom_mean(np.abs(q * np.log2(q / p)))
 
 def _distance_surprise(p: np.ndarray, q: np.ndarray) -> float:
-    return np.mean(np.sum(np.tanh(np.abs(np.log2(p / q))) * (np.abs(p-q)/(p+q))))
+    return np.mean(np.tanh(np.abs(np.log2(p / q)) * (np.abs(p-q)/(p+q))))
 
 
 def entropy_score(
