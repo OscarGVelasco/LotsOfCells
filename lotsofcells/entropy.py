@@ -203,9 +203,13 @@ def _plot_entropy(
     subtype_variable, pdf_file=None,
 ):
     import matplotlib.pyplot as plt
-    from ._utils import save_to_pdf
+    from ._utils import draw_threshold_bands, save_to_pdf
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw={"width_ratios": [3, 1]})
+    # Widened last column so the threshold legend has room without
+    # overlapping the scatter cloud.
+    fig, axes = plt.subplots(
+        1, 2, figsize=(13, 5), gridspec_kw={"width_ratios": [3, 1.3]},
+    )
     ax = axes[0]
     n = len(indexes)
     width = 0.35
@@ -224,11 +228,21 @@ def _plot_entropy(
     ax2 = axes[1]
     rng = np.random.default_rng(0)
     jitter = rng.uniform(-0.1, 0.1, size=len(null_scores))
-    ax2.scatter(jitter, null_scores, color="#D5BADB", alpha=0.5, s=15)
-    ax2.axhline(np.median(null_scores), color="#86608E", lw=1)
-    ax2.scatter([0], [obs_score], color="#F08080", s=80, zorder=5)
+    # Scatter first so the y-axis auto-scales to the data before we shade.
+    ax2.scatter(jitter, null_scores, color="#D5BADB", alpha=0.6, s=15, zorder=3)
+    ax2.axhline(np.median(null_scores), color="#86608E", lw=1, zorder=4)
+    ax2.scatter([0], [obs_score], color="#F08080", s=80, zorder=5,
+                edgecolor="black", linewidth=0.4)
+    ax2.set_xlim(-0.5, 0.5)
     ax2.set_xticks([])
     ax2.set_ylabel("symmetric divergence")
+
+    # Shade the six qualitative-change bands behind the cloud. Bands are
+    # calibrated on the bounded_fc_mean scale (see
+    # examples/simulation_calibration_realistic.py) — keep them as a
+    # reference against which the observed score can be read visually.
+    draw_threshold_bands(ax2, alpha=0.30, zorder=0, min_top=0.20)
+
     plt.tight_layout()
     save_to_pdf(fig, pdf_file)
 
@@ -344,13 +358,14 @@ def _one_class_test(
     if plot:
         try:
             import matplotlib.pyplot as plt
-            from ._utils import save_to_pdf
+            from ._utils import draw_threshold_bands, save_to_pdf
 
-            fig, ax = plt.subplots(figsize=(3.5, 5))
+            # Wider figure so the threshold legend has room outside.
+            fig, ax = plt.subplots(figsize=(5.5, 5))
             jitter_rng = np.random.default_rng(seed if seed is not None else 0)
             jitter = jitter_rng.uniform(-0.1, 0.1, size=len(null_scores))
-            ax.scatter(jitter, null_scores, color="#D5BADB", alpha=0.5, s=15)
-            ax.axhline(median_null, color="#86608E", lw=1)
+            ax.scatter(jitter, null_scores, color="#D5BADB", alpha=0.6, s=15, zorder=3)
+            ax.axhline(median_null, color="#86608E", lw=1, zorder=4)
             ax.set_xlim(-0.5, 0.5)
             lo = float(min(0.0, null_scores.min()))
             hi = float(null_scores.max())
@@ -362,6 +377,11 @@ def _one_class_test(
                 f"1-class null distribution\n"
                 f"median={median_null:.4f}  CV={cv:.1f}%  ({variation})"
             )
+
+            # Six qualitative-change bands behind the null cloud (grey →
+            # deep purple as intensity grows). Calibrated on bounded_fc_mean
+            # — see examples/simulation_calibration_realistic.py.
+            draw_threshold_bands(ax, alpha=0.30, zorder=0, min_top=0.20)
             plt.tight_layout()
             save_to_pdf(fig, pdf_file)
         except Exception:

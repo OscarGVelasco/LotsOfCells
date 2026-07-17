@@ -214,6 +214,89 @@ def desaturate(color: str, amount: float = 0.16) -> str:
     return _rgb_to_hex((r, g, b))
 
 
+# -------------------------------------------------------------------
+# Qualitative-change thresholds for composition-divergence scores.
+#
+# Anchored at 75% penetrance × 50% cell types dysregulated = 0.151 in
+# the bounded_fc_mean calibration study (see
+# examples/simulation_calibration_realistic.py). Every other band is
+# picked to match a biologically defensible scenario at that qualitative
+# level. Colour ramp goes grey → deep purple as intensity grows.
+#
+# Note: bands are calibrated for the bounded_fc_mean scale. When the
+# underlying `entropy_score` metric is KL-symmetric divergence the scores
+# span a different range — the bands are still visually informative for
+# comparison against a reference, but the exact category labels will not
+# apply verbatim.
+# -------------------------------------------------------------------
+CATEGORY_THRESHOLDS = {
+    "None":        (0.00, 0.09),
+    "Mild":        (0.09, 0.12),
+    "Moderate":    (0.12, 0.15),
+    "Substantial": (0.15, 0.20),
+    "Extensive":   (0.20, 0.28),
+    "Severe":      (0.28, float("inf")),
+}
+CATEGORY_COLORS = {
+    "None":        "#F2F2F2",   # very light grey
+    "Mild":        "#DCD0E4",   # pale lavender
+    "Moderate":    "#B698CE",   # light purple
+    "Substantial": "#86608E",   # mid purple (matches existing package palette)
+    "Extensive":   "#613269",   # deep purple (already in the default palette)
+    "Severe":      "#2A1240",   # near-black purple
+}
+
+
+def draw_threshold_bands(ax, alpha: float = 0.30, zorder: int = 0,
+                          min_top: float = 0.20, add_legend: bool = True,
+                          legend_kwargs: Optional[dict] = None) -> None:
+    """Shade the six qualitative-change threshold bands behind an Axes.
+
+    Parameters
+    ----------
+    ax
+        Matplotlib Axes to shade. The bands run horizontally along the
+        y-axis (score axis).
+    alpha
+        Band transparency. Default 0.30 keeps overlaid scatter readable.
+    zorder
+        Drawing order. Default 0 puts the bands behind data.
+    min_top
+        Extend the y-axis at least this high (default 0.20 = start of
+        Extensive) so the ★ Substantial anchor is always visible.
+    add_legend
+        Attach a compact legend (patches) explaining the six bands.
+    legend_kwargs
+        Overrides for the legend call (loc, fontsize, bbox_to_anchor…).
+    """
+    import matplotlib.patches as mpatches
+
+    ylim = ax.get_ylim()
+    new_top = max(ylim[1], min_top)
+    for name, (lo, hi) in CATEGORY_THRESHOLDS.items():
+        if lo >= new_top:
+            break
+        hi_draw = min(hi, new_top)
+        ax.axhspan(lo, hi_draw, color=CATEGORY_COLORS[name],
+                   alpha=alpha, zorder=zorder, linewidth=0)
+    ax.set_ylim(ylim[0], new_top)
+
+    if add_legend:
+        handles = [
+            mpatches.Patch(color=CATEGORY_COLORS[name], alpha=alpha, label=name)
+            for name in CATEGORY_THRESHOLDS
+        ]
+        defaults = dict(
+            loc="upper left", bbox_to_anchor=(1.02, 1.0),
+            fontsize=7, frameon=False, title="Change level",
+            title_fontsize=7, handlelength=1.2, handletextpad=0.4,
+            borderaxespad=0.0,
+        )
+        if legend_kwargs:
+            defaults.update(legend_kwargs)
+        ax.legend(handles=handles, **defaults)
+
+
 def save_to_pdf(fig, pdf_file: Optional[str]) -> None:
     """Save a matplotlib Figure to PDF if `pdf_file` is provided.
 
