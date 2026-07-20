@@ -44,6 +44,78 @@ def _distance_surprise(p: np.ndarray, q: np.ndarray) -> float:
     return np.mean(np.tanh(np.abs(np.log2(p / q)) * (np.abs(p-q)/(p+q))))
 
 
+def _bootstrap_observed_score(
+    metadata: pd.DataFrame,
+    main_variable: str,
+    subtype_variable: str,
+    sample_id: Optional[str],
+    label_order: Sequence[str],
+    indexes,
+    n_bootstrap: int,
+    rng: np.random.Generator,
+    verbose: bool = True,
+) -> np.ndarray:
+    """Within-group bootstrap of the observed entropy score.
+
+    Mirrors the "resample-from-original" step that :func:`lots_of_cells`
+    uses to build its `CI95low`/`CI95high` — resample within each group
+    (with replacement) so per-group structure is preserved, then recompute
+    the score. The spread across replicates estimates the internal
+    variability of the observed score.
+
+    - If ``sample_id`` is provided, resamples at the SAMPLE level:
+      draws samples with replacement per group, keeps every cell of the
+      drawn samples. That's the biologically appropriate unit of
+      independence.
+    - Otherwise resamples cells with replacement within each group as a
+      fallback.
+
+    Returns an array of length ``n_bootstrap``.
+    """
+    if verbose:
+        unit = "samples" if sample_id is not None else "cells"
+        print(f"Bootstrap: {n_bootstrap} within-group resamples ({unit}) "
+              "for observed-score variability")
+    boot_scores = np.empty(n_bootstrap)
+    for i in range(n_bootstrap):
+        grp_pieces, cov_pieces = [], []
+        for label in label_order:
+            group_mask = (
+                metadata[main_variable].astype(str).to_numpy() == label
+            )
+            if sample_id is not None:
+                samples_in_group = (
+                    metadata.loc[group_mask, sample_id].astype(str).unique()
+                )
+                if len(samples_in_group) == 0:
+                    continue
+                boot_samples = rng.choice(
+                    samples_in_group, size=len(samples_in_group), replace=True,
+                )
+                sample_col = metadata[sample_id].astype(str).to_numpy()
+                sub_col = metadata[subtype_variable].astype(str).to_numpy()
+                for s in boot_samples:
+                    m = group_mask & (sample_col == s)
+                    n = int(m.sum())
+                    if n == 0:
+                        continue
+                    cov_pieces.append(sub_col[m])
+                    grp_pieces.append(np.repeat(label, n))
+            else:
+                idxs = np.where(group_mask)[0]
+                boot_idxs = rng.choice(idxs, size=len(idxs), replace=True)
+                cov_pieces.append(
+                    metadata[subtype_variable].astype(str).to_numpy()[boot_idxs]
+                )
+                grp_pieces.append(np.repeat(label, len(boot_idxs)))
+        cov = np.concatenate(cov_pieces)
+        grp = np.concatenate(grp_pieces)
+        boot_tab = _table(grp, cov)
+        contig_boot = _proportions_arcsin(boot_tab, label_order, indexes)
+        boot_scores[i] = _distance_surprise(contig_boot[0], contig_boot[1])
+    return boot_scores
+
+
 def entropy_score(
     sc_object,
     main_variable: str,
@@ -51,6 +123,7 @@ def entropy_score(
     label_order: Sequence[str],
     sample_id: Optional[str] = None,
     permutations: int = 1000,
+    n_bootstrap: int = 10,
     seed: Optional[int] = None,
     n_cores: Optional[int] = None,
     table: Optional[str] = None,
@@ -174,6 +247,25 @@ def entropy_score(
 
     p_val = float((null_scores >= obs_score).sum() / permutations)
 
+    # Within-group bootstrap CI for the observed score (rendered as an
+    # error bar on the red observed dot in _plot_entropy).
+    boot_scores = np.empty(0)
+    if n_bootstrap and n_bootstrap > 0:
+        boot_rng = np.random.default_rng(
+            None if seed is None else int(seed) + 7919
+        )  # separate stream so it doesn't shadow the null rng
+        boot_scores = _bootstrap_observed_score(
+            metadata=metadata,
+            main_variable=main_variable,
+            subtype_variable=subtype_variable,
+            sample_id=sample_id,
+            label_order=label_order,
+            indexes=indexes,
+            n_bootstrap=int(n_bootstrap),
+            rng=boot_rng,
+            verbose=verbose,
+        )
+
     if plot:
         try:
             _plot_entropy(
@@ -184,6 +276,7 @@ def entropy_score(
                 null_scores=null_scores,
                 p_val=p_val,
                 subtype_variable=subtype_variable,
+                boot_scores=boot_scores,
                 pdf_file=pdf_file,
             )
         except Exception as e:  # noqa: BLE001
@@ -195,12 +288,17 @@ def entropy_score(
     out["p.val"] = p_val
     out["mean.random.entropy"] = float(null_scores.mean())
     out["sd.random.entropy"] = float(null_scores.std(ddof=1))
+    if len(boot_scores) > 1:
+        out["boot.sd"] = float(np.std(boot_scores, ddof=1))
+        out["boot.CI95low"] = float(np.quantile(boot_scores, 0.025))
+        out["boot.CI95high"] = float(np.quantile(boot_scores, 0.975))
+        out["boot.n"] = int(len(boot_scores))
     return out
 
 
 def _plot_entropy(
     contig, indexes, label_order, obs_score, null_scores, p_val,
-    subtype_variable, pdf_file=None,
+    subtype_variable, boot_scores=None, pdf_file=None,
 ):
     import matplotlib.pyplot as plt
     from ._utils import draw_threshold_bands, save_to_pdf
@@ -231,8 +329,30 @@ def _plot_entropy(
     # Scatter first so the y-axis auto-scales to the data before we shade.
     ax2.scatter(jitter, null_scores, color="#D5BADB", alpha=0.6, s=15, zorder=3)
     ax2.axhline(np.median(null_scores), color="#86608E", lw=1, zorder=4)
-    ax2.scatter([0], [obs_score], color="#F08080", s=80, zorder=5,
-                edgecolor="black", linewidth=0.4)
+
+    # Observed dot with bootstrap ± SD error bar. Bootstrap replicates are
+    # shown as small crosses jittered next to the observed dot so the raw
+    # variability is visible alongside the aggregated error bar.
+    if boot_scores is not None and len(boot_scores) > 1:
+        boot_sd = float(np.std(boot_scores, ddof=1))
+        boot_jitter = rng.uniform(0.06, 0.20, size=len(boot_scores))
+        ax2.scatter(
+            boot_jitter, boot_scores,
+            marker="x", color="#B22222", s=25, linewidth=0.9,
+            alpha=0.85, zorder=5,
+        )
+        ax2.errorbar(
+            [0], [obs_score], yerr=[[boot_sd], [boot_sd]],
+            fmt="o", color="#F08080", markersize=10,
+            markeredgecolor="black", markeredgewidth=0.5,
+            ecolor="#B22222", elinewidth=1.2, capsize=5, capthick=1.0,
+            zorder=6, label=f"observed ± bootstrap SD (n={len(boot_scores)})",
+        )
+    else:
+        ax2.scatter(
+            [0], [obs_score], color="#F08080", s=80, zorder=5,
+            edgecolor="black", linewidth=0.4, label="observed",
+        )
     ax2.set_xlim(-0.5, 0.5)
     ax2.set_xticks([])
     ax2.set_ylabel("symmetric divergence")

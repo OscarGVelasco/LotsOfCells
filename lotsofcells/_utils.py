@@ -231,19 +231,19 @@ def desaturate(color: str, amount: float = 0.16) -> str:
 # -------------------------------------------------------------------
 CATEGORY_THRESHOLDS = {
     "None":        (0.00, 0.09),
-    "Mild":        (0.09, 0.12),
-    "Moderate":    (0.12, 0.15),
-    "Substantial": (0.15, 0.20),
-    "Extensive":   (0.20, 0.28),
-    "Severe":      (0.28, float("inf")),
+    "Minor":        (0.09, 0.12),
+    "Mild":    (0.12, 0.15),
+    "Moderate": (0.15, 0.20),
+    "Substantial":   (0.20, 0.28),
+    "Extensive":      (0.28, float("inf")),
 }
 CATEGORY_COLORS = {
     "None":        "#F2F2F2",   # very light grey
-    "Mild":        "#DCD0E4",   # pale lavender
-    "Moderate":    "#B698CE",   # light purple
-    "Substantial": "#86608E",   # mid purple (matches existing package palette)
-    "Extensive":   "#613269",   # deep purple (already in the default palette)
-    "Severe":      "#2A1240",   # near-black purple
+    "Minor":        "#DCD0E4",   # pale lavender
+    "Mild":    "#B698CE",   # light purple
+    "Moderate": "#86608E",   # mid purple (matches existing package palette)
+    "Substantial":   "#613269",   # deep purple (already in the default palette)
+    "Extensive":      "#2A1240",   # near-black purple
 }
 
 
