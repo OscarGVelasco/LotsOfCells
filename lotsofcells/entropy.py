@@ -74,8 +74,23 @@ def _bootstrap_observed_score(
     """
     if verbose:
         unit = "samples" if sample_id is not None else "cells"
-        print(f"Bootstrap: {n_bootstrap} within-group resamples ({unit}) "
-              "for observed-score variability")
+        # Report how many units per group are being drawn so users can
+        # see the bootstrap preserves group size rather than subsetting.
+        sizes = []
+        for label in label_order:
+            group_mask = (metadata[main_variable].astype(str).to_numpy() == label)
+            if sample_id is not None:
+                n_units = len(
+                    metadata.loc[group_mask, sample_id].astype(str).unique()
+                )
+            else:
+                n_units = int(group_mask.sum())
+            sizes.append(f"{label}: {n_units} {unit}")
+        print(
+            f"Bootstrap: {n_bootstrap} within-group resamples of "
+            f"{unit} with replacement ({'; '.join(sizes)}) "
+            "→ observed-score variability"
+        )
     boot_scores = np.empty(n_bootstrap)
     for i in range(n_bootstrap):
         grp_pieces, cov_pieces = [], []
@@ -123,7 +138,7 @@ def entropy_score(
     label_order: Sequence[str],
     sample_id: Optional[str] = None,
     permutations: int = 1000,
-    n_bootstrap: int = 10,
+    n_bootstrap: int = 100,
     seed: Optional[int] = None,
     n_cores: Optional[int] = None,
     table: Optional[str] = None,
@@ -330,23 +345,25 @@ def _plot_entropy(
     ax2.scatter(jitter, null_scores, color="#D5BADB", alpha=0.6, s=15, zorder=3)
     ax2.axhline(np.median(null_scores), color="#86608E", lw=1, zorder=4)
 
-    # Observed dot with bootstrap ± SD error bar. Bootstrap replicates are
-    # shown as small crosses jittered next to the observed dot so the raw
-    # variability is visible alongside the aggregated error bar.
+    # Observed dot with an ASYMMETRIC bootstrap percentile CI.
+    # ± SD is misleading when the bootstrap distribution is skewed (which
+    # is common with small-sample cluster bootstraps — one heavy-composition
+    # sample drawn 3-of-4 times inflates the upper tail). Percentile CIs
+    # give an honest picture of the actual spread on each side of the
+    # observed value.
     if boot_scores is not None and len(boot_scores) > 1:
-        boot_sd = float(np.std(boot_scores, ddof=1))
-        boot_jitter = rng.uniform(0.06, 0.20, size=len(boot_scores))
-        ax2.scatter(
-            boot_jitter, boot_scores,
-            marker="x", color="#B22222", s=25, linewidth=0.9,
-            alpha=0.85, zorder=5,
-        )
+        lo = float(np.quantile(boot_scores, 0.025))
+        hi = float(np.quantile(boot_scores, 0.975))
+        # Clip negative lower bound at 0 — the score is non-negative.
+        lo = max(lo, 0.0)
+        yerr = [[max(obs_score - lo, 0.0)], [max(hi - obs_score, 0.0)]]
         ax2.errorbar(
-            [0], [obs_score], yerr=[[boot_sd], [boot_sd]],
+            [0], [obs_score], yerr=yerr,
             fmt="o", color="#F08080", markersize=10,
             markeredgecolor="black", markeredgewidth=0.5,
             ecolor="#B22222", elinewidth=1.2, capsize=5, capthick=1.0,
-            zorder=6, label=f"observed ± bootstrap SD (n={len(boot_scores)})",
+            zorder=6,
+            label=f"observed with bootstrap 95% CI (n={len(boot_scores)})",
         )
     else:
         ax2.scatter(
