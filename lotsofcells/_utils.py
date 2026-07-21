@@ -16,7 +16,6 @@ _DEFAULT_PALETTE = [
     "#F7B6D2", "#DBDB8D", "#9EDAE5", "#AD494A", "#8C6D31",
 ]
 
-
 def _is_anndata(obj) -> bool:
     """Return True if obj quacks like an AnnData (has .obs)."""
     try:
@@ -237,6 +236,7 @@ CATEGORY_THRESHOLDS = {
     "Substantial":   (0.20, 0.28),
     "Extensive":      (0.28, float("inf")),
 }
+"""
 CATEGORY_COLORS = {
     "None":        "#F2F2F2",   # very light grey
     "Minor":        "#DCD0E4",   # pale lavender
@@ -245,7 +245,14 @@ CATEGORY_COLORS = {
     "Substantial":   "#613269",   # deep purple (already in the default palette)
     "Extensive":      "#2A1240",   # near-black purple
 }
-
+"""
+CATEGORY_COLORS = {
+    "None":        "#CCCCCC",
+    "Minor":        "#5CCD9ACB",
+    "Moderate":    "#F9BE8D",
+    "Substantial": "#B25356",
+    "Extensive":   "#613269",
+}
 
 def draw_threshold_bands(ax, alpha: float = 0.30, zorder: int = 0,
                           min_top: float = 0.20, add_legend: bool = True,

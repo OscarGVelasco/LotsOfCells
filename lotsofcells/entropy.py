@@ -262,25 +262,6 @@ def entropy_score(
 
     p_val = float((null_scores >= obs_score).sum() / permutations)
 
-    # Within-group bootstrap CI for the observed score (rendered as an
-    # error bar on the red observed dot in _plot_entropy).
-    boot_scores = np.empty(0)
-    if n_bootstrap and n_bootstrap > 0:
-        boot_rng = np.random.default_rng(
-            None if seed is None else int(seed) + 7919
-        )  # separate stream so it doesn't shadow the null rng
-        boot_scores = _bootstrap_observed_score(
-            metadata=metadata,
-            main_variable=main_variable,
-            subtype_variable=subtype_variable,
-            sample_id=sample_id,
-            label_order=label_order,
-            indexes=indexes,
-            n_bootstrap=int(n_bootstrap),
-            rng=boot_rng,
-            verbose=verbose,
-        )
-
     if plot:
         try:
             _plot_entropy(
@@ -291,7 +272,6 @@ def entropy_score(
                 null_scores=null_scores,
                 p_val=p_val,
                 subtype_variable=subtype_variable,
-                boot_scores=boot_scores,
                 pdf_file=pdf_file,
             )
         except Exception as e:  # noqa: BLE001
@@ -303,11 +283,6 @@ def entropy_score(
     out["p.val"] = p_val
     out["mean.random.entropy"] = float(null_scores.mean())
     out["sd.random.entropy"] = float(null_scores.std(ddof=1))
-    if len(boot_scores) > 1:
-        out["boot.sd"] = float(np.std(boot_scores, ddof=1))
-        out["boot.CI95low"] = float(np.quantile(boot_scores, 0.025))
-        out["boot.CI95high"] = float(np.quantile(boot_scores, 0.975))
-        out["boot.n"] = int(len(boot_scores))
     return out
 
 
