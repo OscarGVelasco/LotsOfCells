@@ -249,6 +249,7 @@ CATEGORY_COLORS = {
 CATEGORY_COLORS = {
     "None":        "#CCCCCC",
     "Minor":        "#5CCD9ACB",
+    "Mild":        "#FFE39A",
     "Moderate":    "#F9BE8D",
     "Substantial": "#B25356",
     "Extensive":   "#613269",
