@@ -152,9 +152,11 @@ def entropy_score(
     summary fields (``entropy_score``, ``p.val``, ``mean.random.entropy``,
     ``sd.random.entropy``).
 
-    If ``len(label_order) == 1``, runs the 1-class permutation test on
-    ``sample_id`` (analogue of the R `oneClassTest`) and returns a small
-    summary dict instead.
+    If ``len(label_order) == 1``, runs the 1-class tests on ``sample_id``
+    (see :func:`_one_class_test_2`) and returns a tuple
+    ``(individual_data, total_data)`` of two DataFrames instead:
+    pairwise scores of the individual test and per-sample scores of the
+    total test.
     """
     metadata = get_metadata(sc_object, table=table)
 
@@ -173,7 +175,7 @@ def entropy_score(
     if len(label_order) == 1:
         if sample_id is None:
             raise ValueError("In 1-class mode you must specify `sample_id`.")
-        return _one_class_test(
+        return _one_class_test_2(
             metadata,
             sample_id,
             covariable,
@@ -358,7 +360,6 @@ def _plot_entropy(
     plt.tight_layout()
     save_to_pdf(fig, pdf_file)
 
-
 def _one_class_test(
     metadata,
     sample_id,
@@ -507,3 +508,310 @@ def _one_class_test(
         "sd.random.entropy": sd_null,
         "median.random.entropy": median_null,
     }
+
+
+
+
+def _one_class_test_2(
+    metadata,
+    sample_id,
+    covariable,
+    permutations,
+    seed=None,
+    n_cores=None,
+    plot=True,
+    verbose=True,
+    pdf_file=None,
+):
+    """Alternative to `_one_class_test`: compares the samples directly.
+
+    - individual_test: every sample against every other sample (pairwise scores)
+    - total_test: every sample against a random draw from all remaining samples
+
+    Same signature as `_one_class_test`, so that switching between the two
+    variants only requires changing the function name in `entropy_score`.
+    `n_cores` is accepted for compatibility but not used (yet).
+
+    Returns
+    -------
+    individual_data : pandas.DataFrame
+        One row per ordered sample pair with columns
+        ``sample``, ``compared_to``, ``Score``.
+    total_data : pandas.DataFrame
+        One row per sample with columns
+        ``sample``, ``Mean Score``, ``Std of Score``, ``Median Score``.
+    """
+    rng = np.random.default_rng(seed)
+
+    samples = metadata[sample_id].astype(str).to_numpy()
+    obs_tab = _table(samples, covariable)
+    indexes = list(obs_tab.columns)
+    if verbose:
+        print("obs_tab")
+        print(obs_tab)
+
+    # Per-sample pool of cell-type labels (the real composition of each sample)
+    n_per_sample = pd.Series(samples).value_counts()
+    sample_pools = {s: covariable[samples == s] for s in n_per_sample.index}
+    unique_samples = list(n_per_sample.index)
+
+    if len(unique_samples) < 2:
+        raise ValueError(
+            "1-class entropy test needs at least 2 samples in `sample_id`."
+        )
+
+    individual_data, score_matrix = individual_test(unique_samples, sample_pools, indexes)
+    total_data, _ = total_test(permutations, unique_samples, sample_pools, indexes, rng)
+
+    if verbose:
+        print("individual_data")
+        print(individual_data)
+        print("total_data")
+        print(total_data)
+
+    if plot:
+        # Plotting errors must not abort the test (same behaviour as `_one_class_test`)
+        try:
+            import matplotlib.pyplot as plt
+
+            fig_bar, _ = plot_bar(
+                total_data["sample"], total_data["Mean Score"], total_data["Std of Score"]
+            )
+            g = plot_heatmap(individual_data, unique_samples, score_matrix=score_matrix)
+
+            # Both figures are written into a single PDF if a path is given
+            if pdf_file is not None:
+                from matplotlib.backends.backend_pdf import PdfPages
+                with PdfPages(pdf_file) as pdf:
+                    pdf.savefig(fig_bar, bbox_inches="tight")
+                    pdf.savefig(g.fig, bbox_inches="tight")
+            plt.show()
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"(Plot skipped: {e})")
+
+    return individual_data, total_data
+
+
+def individual_test(unique_samples, sample_pools, indexes):
+    """Compute exactly ONE distance-surprise score for every sample pair.
+
+    Each pair is scored directly from the observed cell-type distributions
+    (no resampling). The score is symmetric (Score(A, B) == Score(B, A)),
+    so every pair is computed only once and mirrored into the matrix.
+
+    Returns
+    -------
+    data : pandas.DataFrame
+        One row per ordered pair (``sample``, ``compared_to``, ``Score``).
+    score_matrix : numpy.ndarray
+        Symmetric (n_samples x n_samples) matrix of scores, NaN on the diagonal.
+    """
+    n_samples = len(unique_samples)
+    score_matrix = np.full((n_samples, n_samples), np.nan)
+
+    for k in range(n_samples):
+        pool_k = sample_pools[unique_samples[k]]
+        if len(pool_k) == 0:
+            continue
+        for j in range(k + 1, n_samples):
+            pool_j = sample_pools[unique_samples[j]]
+            if len(pool_j) == 0:
+                continue
+
+            cov = np.concatenate([pool_k, pool_j])
+            grp = np.concatenate([
+                np.repeat("sample_0", len(pool_k)),
+                np.repeat("sample_1", len(pool_j)),
+            ])
+            tab = _table(grp, cov)
+            p = _proportions_arcsin(tab, ["sample_0", "sample_1"], indexes)
+            score = _distance_surprise(p[0], p[1])
+            score_matrix[k, j] = score
+            score_matrix[j, k] = score
+
+    # Long format: one row per ordered pair (both directions listed)
+    rows = []
+    for k, s0 in enumerate(unique_samples):
+        for j, s in enumerate(unique_samples):
+            if s == s0:
+                continue
+            rows.append({
+                "sample": s0,
+                "compared_to": s,
+                "Score": score_matrix[k, j],
+            })
+
+    data = pd.DataFrame(rows)
+    return data, score_matrix
+
+
+def total_test(permutations, unique_samples, sample_pools, indexes, rng):
+    """Compare every sample against an artificial reference built from all other samples.
+
+    For each sample s0, the reference consists of n cells drawn at random
+    (with replacement) from the pooled cells of all remaining samples, where
+    n is the number of cells in s0. This is repeated ``permutations`` times.
+
+    Returns
+    -------
+    data : pandas.DataFrame
+        One row per sample with ``Mean Score``, ``Std of Score`` and
+        ``Median Score`` across the random draws.
+    null_scores : numpy.ndarray
+        All individual scores, shape (permutations, n_samples).
+    """
+    n_samples = len(unique_samples)
+    null_scores = np.empty((permutations, n_samples))
+    rows = []
+
+    for k, s0 in enumerate(unique_samples):
+        pool_s0 = sample_pools[s0]
+        n0 = len(pool_s0)
+        # Depends only on s0, so it is built once instead of in every repetition
+        pool_rest = np.concatenate([sample_pools[s] for s in unique_samples if s != s0])
+        grp = np.concatenate([np.repeat("sample_0", n0), np.repeat("rest", n0)])
+
+        for i in range(permutations):
+            draw = rng.choice(pool_rest, size=n0, replace=True)
+            cov = np.concatenate([pool_s0, draw])
+            rand_tab = _table(grp, cov)
+            p = _proportions_arcsin(rand_tab, ["sample_0", "rest"], indexes)
+            null_scores[i, k] = _distance_surprise(p[0], p[1])
+
+        col = null_scores[:, k]
+        rows.append((s0, col.mean(), col.std(ddof=1), np.median(col)))
+
+    data = pd.DataFrame(rows, columns=["sample", "Mean Score", "Std of Score", "Median Score"])
+    return data, null_scores
+
+
+# Colour scale of the one-class plots: a continuous transition from green
+# (low heterogeneity) over blue (medium) to purple (high). The medium range
+# lies between the two bounds; the colour is pure blue in its middle.
+HEATMAP_BANDS = (0.5, 0.7)    # pairwise scores (individual test)
+BAR_BANDS = (0.63, 0.78)      # mean scores (total test)
+HETEROGENEITY_COLORS = [
+    "#a6dba0",   # score 0:            light green (very similar)
+    "#1b7837",   # lower bound:        green
+    "#2166ac",   # middle of the band: blue
+    "#762a83",   # upper bound:        purple
+    "#40004b",   # score 1:            dark purple (very different)
+]
+
+
+def _heterogeneity_cmap(bands):
+    """Colormap on the score range [0, 1]: green below the lower bound,
+    transition through blue inside the medium range, purple above the upper bound."""
+    from matplotlib.colors import LinearSegmentedColormap
+
+    lo, hi = bands
+    positions = [0.0, lo, (lo + hi) / 2, hi, 1.0]
+    return LinearSegmentedColormap.from_list(
+        "heterogeneity", list(zip(positions, HETEROGENEITY_COLORS))
+    )
+
+
+def _mark_bands_on_colorbar(cbar_ax, bands):
+    """Draw the two bounds on a vertical colour bar and label them."""
+    lo, hi = bands
+    for bound in bands:
+        cbar_ax.axhline(bound, color="white", linewidth=1.5)
+    cbar_ax.set_yticks([0.0, lo, hi, 1.0])
+    cbar_ax.set_yticklabels(["0", f"{lo:g}", f"{hi:g}", "1"])
+
+
+def plot_bar(label_order, scores, errors, test_name="total", bands=BAR_BANDS):
+    """Bar chart (mean ± SD) of the total-test score per sample.
+
+    The colour of each bar shows the heterogeneity of the sample: a continuous
+    transition from green (low) over blue (medium, between the two values of
+    ``bands``) to purple (high). The bounds are drawn as dashed lines.
+
+    Note: the error bars only reflect the variation between the random
+    reference draws, not biological variability.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    label_order = np.asarray(label_order)
+    scores = np.asarray(scores, dtype=float)
+    errors = np.asarray(errors, dtype=float)
+    x = np.arange(len(label_order))
+
+    cmap = _heterogeneity_cmap(bands)
+    norm = Normalize(vmin=0.0, vmax=1.0)
+
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    ax.bar(x, scores, yerr=errors, capsize=10, width=0.6,
+           color=cmap(norm(scores)), edgecolor="black", linewidth=0.5)
+    for bound in bands:
+        ax.axhline(bound, color="black", linestyle="--", linewidth=0.8, zorder=0)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(label_order, rotation=45, ha="right")
+    ax.set_xlabel("Sample")
+    ax.set_ylabel("Score")
+    ax.set_title(f"Results: {test_name}-test\nMean ± SD across random reference draws")
+
+    cbar = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, pad=0.02)
+    cbar.set_label("Heterogeneity (score)")
+    _mark_bands_on_colorbar(cbar.ax, bands)
+
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(min(0, ymin), max(ymax, bands[1] * 1.05))
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_heatmap(individual_data, unique_samples, score_matrix=None,
+                 test_name="individual", bands=HEATMAP_BANDS):
+    """Clustered heatmap of the pairwise scores from the individual test.
+
+    The scores are themselves distances between samples and are therefore
+    used directly for the hierarchical clustering. The colour shows the
+    heterogeneity of each pair: a continuous transition from green (low) over
+    blue (medium, between the two values of ``bands``) to purple (high).
+    The diagonal (a sample compared with itself) is left blank.
+    """
+    import seaborn as sns
+    from scipy.cluster.hierarchy import linkage
+    from scipy.spatial.distance import squareform
+
+    if score_matrix is not None:
+        score_df = pd.DataFrame(score_matrix, index=unique_samples, columns=unique_samples)
+    else:
+        score_df = individual_data.pivot_table(
+            index="sample", columns="compared_to", values="Score", aggfunc="mean"
+        )
+        score_df = score_df.combine_first(score_df.T)
+
+    # No self-comparison exists on the diagonal -> 0 (distance to itself) for
+    # the clustering; it is masked in the plot.
+    score_df = score_df.fillna(0)
+    mask = np.eye(score_df.shape[0], dtype=bool)
+
+    # Average-linkage clustering on the score matrix used as a distance matrix
+    link = linkage(squareform(score_df.to_numpy(), checks=False), method="average")
+
+    n = score_df.shape[0]
+    show_labels = n <= 50  # labels become unreadable with many samples
+
+    g = sns.clustermap(
+        score_df,
+        row_linkage=link,
+        col_linkage=link,
+        mask=mask,
+        cmap=_heterogeneity_cmap(bands),
+        vmin=0.0,
+        vmax=1.0,
+        figsize=(14, 14),
+        xticklabels=show_labels,
+        yticklabels=show_labels,
+        cbar_kws={"label": "Heterogeneity (score)"},
+    )
+    _mark_bands_on_colorbar(g.ax_cbar, bands)
+
+    g.fig.suptitle(f"Results: {test_name}-test", fontsize=14, fontweight="bold", y=1.02)
+    return g
