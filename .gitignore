@@ -9,3 +9,8 @@ __pycache__/
 lotsofcells/__pycache__/
 tests/
 examples/
+_smoke_pdf/
+_smoke_plots/
+simulation_benchmark/
+test_sample_permutation.py
+

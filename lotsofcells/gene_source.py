@@ -35,6 +35,8 @@ import numpy as np
 import pandas as pd
 
 from ._parallel import run_permutations
+from ._sample_level import kendall_gamma_per_column as _kendall_gamma_per_column
+from ._sample_level import perm_pmin, perm_pvalue
 from ._utils import get_metadata, get_numerical_variable, get_palette, save_to_pdf
 
 
@@ -101,26 +103,6 @@ def _contribution_matrix(
     )
     totals = agg.sum(axis=1)
     return agg.div(totals.where(totals > 0, np.nan), axis=0)
-
-
-def _kendall_gamma_per_column(values: np.ndarray, ranks: np.ndarray) -> np.ndarray:
-    """Kendall gamma between each column of `values` and integer `ranks`.
-
-    Ties in either variable are excluded from concordant/discordant counts.
-    """
-    n, k = values.shape
-    out = np.zeros(k)
-    for j in range(k):
-        val_rank = np.argsort(np.argsort(values[:, j]))
-        c = d = 0
-        for i in range(n - 1):
-            s_g = np.sign(ranks[i] - ranks[i + 1 :])
-            s_x = np.sign(val_rank[i] - val_rank[i + 1 :])
-            mask = (s_g != 0) & (s_x != 0)
-            c += int(np.sum((s_g == s_x) & mask))
-            d += int(np.sum((s_g != s_x) & mask))
-        out[j] = (c - d) / (c + d) if (c + d) > 0 else 0.0
-    return out
 
 
 # ---------------------------------------------------------------------
@@ -200,6 +182,9 @@ def gene_source_score(
     - ``p.val`` — permutation p-value (two-sided)
     - ``p.adj`` — BH-adjusted across cell types
     - ``n_perms_used`` — actual number of permutations
+    - ``p.min`` — smallest achievable p-value for this design (e.g. 0.10
+      for a two-sided 3 vs 3); results at the floor are as strong as the
+      cohort allows
     """
     metadata = get_metadata(sc_object, table=table)
     metadata = metadata.loc[
@@ -360,10 +345,11 @@ def _two_group_test(
                 f"permutations (exact would need {n_exact:,})"
             )
 
-    # Two-sided p-value with +1/+1 correction (never returns 0)
-    obs_abs = np.abs(obs_diff)
-    p_vals = (np.sum(np.abs(null) >= obs_abs, axis=0) + 1) / (n_used + 1)
+    # Two-sided. Exact enumeration already contains the observed labelling,
+    # so it is counted once (count/N); random draws use (count+1)/(N+1).
+    p_vals = perm_pvalue(null, obs_diff, exact=use_exact, alternative="two-sided")
     p_adj = _bh_fdr(p_vals)
+    p_min = perm_pmin(n_used, use_exact, mirror_tie=n_a == n_b)
 
     out = pd.DataFrame(
         {
@@ -373,6 +359,7 @@ def _two_group_test(
             "p.val": np.round(p_vals, 5),
             "p.adj": np.round(p_adj, 5),
             "n_perms_used": n_used,
+            "p.min": p_min,
         },
         index=contrib.columns,
     )
@@ -406,7 +393,7 @@ def _gamma_rank_test(
         n_cores=n_cores, seed=seed, verbose=verbose,
     )
 
-    p_vals = (np.sum(np.abs(null) >= np.abs(obs_gamma), axis=0) + 1) / (permutations + 1)
+    p_vals = perm_pvalue(null, obs_gamma, exact=False, alternative="two-sided")
     p_adj = _bh_fdr(p_vals)
 
     means = {
@@ -418,6 +405,7 @@ def _gamma_rank_test(
     out["p.val"] = np.round(p_vals, 5)
     out["p.adj"] = np.round(p_adj, 5)
     out["n_perms_used"] = permutations
+    out["p.min"] = perm_pmin(permutations, exact=False)
     return out.iloc[np.argsort(-np.abs(out["gammaCor"].to_numpy()))]
 
 

@@ -95,15 +95,16 @@ def _ranked_proportions(
 ) -> np.ndarray:
     """Rows=label_order, cols=covariables.
 
-    Computes per-covariable proportions then ranks across labels.
-    Mirrors `t(apply(dftmp,2,function(row){row/(sum(row)+0.1)}))[labelOrder, indexes]`
-    followed by `t(apply(.,1,rank))`.
+    Computes each group's composition (row-normalised), then ranks cell
+    types within each group. Mirrors R's
+    `t(apply(dftmp, 2, function(row){row/(sum(row)+0.1)}))[labelOrder, indexes]`
+    — there `dftmp` is `table(covariable, groups)` (groups on columns), so
+    `apply(., 2, ...)` normalises per group — followed by `t(apply(., 1, rank))`.
     """
     tab = _ensure_rows(tab, label_order)
     tab = _ensure_cols(tab, indexes)
-    # column-wise proportions: row/(sum(row)+0.1) per column => divide each column by (col_sum+0.1)
-    col_sums = tab.values.sum(axis=0) + 0.1  # shape (n_cov,)
-    contig = tab.values / col_sums[np.newaxis, :]  # rows = labels in label_order
+    vals = tab.values.astype(float)
+    contig = vals / (vals.sum(axis=1, keepdims=True) + 0.1)  # per-group composition
     # rank within each row across covariables (R: apply(contig_tab,1,rank))
     # 'average' ties to mirror base::rank's default
     ranks = np.apply_along_axis(_rank_avg, 1, contig)
@@ -216,14 +217,18 @@ def _proportions_from_table(
     indexes: Sequence[str],
     pseudo: bool = True,
 ) -> np.ndarray:
-    """`pseudo_count(tab)` then column-wise proportions, indexed by label_order/indexes."""
+    """`pseudo_count(tab)` then per-group composition (rows sum to ~1).
+
+    Mirrors R's `t(apply(pseudoCount(table(groups, covariable)), 1,
+    function(row){row/(sum(row)+1)}))`: each group's counts are divided by
+    that group's total, so group size (tissue area) cancels out.
+    """
     tab = _ensure_rows(tab, label_order)
     tab = _ensure_cols(tab, indexes)
     vals = tab.values.astype(float)
     if pseudo:
         vals = pseudo_count(vals)
-    col_sums = vals.sum(axis=0) + 1.0
-    return vals / col_sums[np.newaxis, :]  # (n_labels, n_cov)
+    return vals / (vals.sum(axis=1, keepdims=True) + 1.0)  # (n_labels, n_cov)
 
 
 def cell_to_montecarlo(

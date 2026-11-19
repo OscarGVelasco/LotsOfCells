@@ -616,8 +616,7 @@ def dynamics_chart(
 ):
     """Visualize per-cell-type proportion dynamics across ordered groups."""
     df = gamma_results.copy()
-    summary_cols = {"groupGammaCor", "p.adj", "CI95low", "CI95high"}
-    pct_cols = [c for c in df.columns if c not in summary_cols]
+    pct_cols = [c for c in df.columns if c.startswith("percent_in_")]
     if scale_data:
         scaled = df[pct_cols].apply(lambda r: (r - r.mean()) / r.std(ddof=1), axis=1)
         df[pct_cols] = scaled
@@ -683,7 +682,7 @@ def plot_abundance_test(
     on_right = cols[1].split("percent_in_")[1]
     on_left = cols[2].split("percent_in_")[1]
     guide = float(np.ceil(max(np.abs(df[["CI95low", "CI95high"]].fillna(0).to_numpy()).max(), 0))) + 0.5
-    p_adj = df["p.adj"].to_numpy()
+    p_adj = df["p.adj"].to_numpy(dtype=float, copy=True)
     p_adj[p_adj == 0] = 1e-5
     significance = np.sign(df["groupFC"].values) * -np.log10(p_adj)
 

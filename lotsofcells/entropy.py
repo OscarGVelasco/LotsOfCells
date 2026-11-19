@@ -7,6 +7,19 @@ import numpy as np
 import pandas as pd
 
 from ._parallel import run_permutations
+from ._sample_level import (
+    bootstrap_group_means,
+    bootstrap_indices,
+    group_weighted_means,
+    perm_pmin,
+    perm_pvalue,
+    per_sample_props,
+    relabellings,
+    report_design,
+    resolve_method,
+    sample_count_matrix,
+    sample_weights,
+)
 from ._stats import (
     _ensure_cols,
     _ensure_rows,
@@ -42,6 +55,11 @@ def _proportions_arcsin(
 
 def _distance_surprise(p: np.ndarray, q: np.ndarray) -> float:
     return np.mean(np.tanh(np.abs(np.log2(p / q)) * (np.abs(p-q)/(p+q))))
+
+
+def _distance_surprise_rows(p: np.ndarray, q: np.ndarray) -> np.ndarray:
+    """Row-wise :func:`_distance_surprise` for ``(N, k)`` composition matrices."""
+    return np.mean(np.tanh(np.abs(np.log2(p / q)) * (np.abs(p - q) / (p + q))), axis=-1)
 
 
 def _bootstrap_observed_score(
@@ -137,7 +155,7 @@ def entropy_score(
     subtype_variable: str,
     label_order: Sequence[str],
     sample_id: Optional[str] = None,
-    permutations: int = 1000,
+    permutations: Optional[int] = None,
     n_bootstrap: int = 100,
     seed: Optional[int] = None,
     n_cores: Optional[int] = None,
@@ -145,12 +163,27 @@ def entropy_score(
     plot: bool = True,
     verbose: bool = True,
     pdf_file: Optional[str] = None,
+    method: str = "auto",
+    weights: str = "sqrt",
+    weight_cap: Optional[float] = 2.0,
+    max_exact: int = 20_000,
 ):
     """Symmetric divergence score for global proportion dysregulation between 2 groups.
 
     Returns a `pandas.Series` with per-covariable relative entropies plus the
     summary fields (``entropy_score``, ``p.val``, ``mean.random.entropy``,
     ``sd.random.entropy``).
+
+    ``method`` works as in :func:`lots_of_cells`: ``"sample_permutation"``
+    builds each group's composition as the (√n-weighted, by default) mean of
+    per-sample compositions, permutes sample labels for the null and
+    resamples samples within groups for the bootstrap CI (adds ``boot.*``,
+    ``p.min`` and ``n_perms``). ``"montecarlo"`` is the original cell-level
+    test. ``"auto"`` picks the sample-level test when ``sample_id`` is given
+    and every group has ≥ 2 samples. ``permutations`` (default 1000) sets the
+    Monte-Carlo iterations; the sample-level null enumerates every relabelling
+    up to ``max_exact`` (default 20,000), otherwise draws ``max_exact`` at
+    random (or ``permutations``, if given).
 
     If ``len(label_order) == 1``, runs the 1-class permutation test on
     ``sample_id`` (analogue of the R `oneClassTest`) and returns a small
@@ -167,6 +200,11 @@ def entropy_score(
     groups = metadata[main_variable].astype(str).to_numpy()
     covariable = metadata[subtype_variable].astype(str).to_numpy()
 
+    # Sample-level null: every relabelling when there are at most `max_exact`,
+    # otherwise that many random ones (or `permutations`, if given). The
+    # cell-level Monte Carlo keeps its own default of 1000.
+    sample_perms = int(max_exact if permutations is None else permutations)
+    permutations = 1000 if permutations is None else int(permutations)
     if len(label_order) == 0:
         raise ValueError("label_order must be specified.")
 
@@ -189,6 +227,19 @@ def entropy_score(
         raise ValueError(
             f"Only 2 labels are allowed for entropy estimation, got "
             f"{len(label_order)}: {label_order}"
+        )
+
+    resolved = resolve_method(method, metadata, main_variable, sample_id,
+                              label_order, verbose=verbose)
+    if resolved == "sample_permutation":
+        return _sample_entropy_path(
+            groups=groups, covariable=covariable,
+            samples=metadata[sample_id].astype(str).to_numpy(),
+            label_order=list(label_order), weights=weights,
+            weight_cap=weight_cap, permutations=sample_perms,
+            n_bootstrap=n_bootstrap, max_exact=max_exact, seed=seed,
+            verbose=verbose, plot=plot, pdf_file=pdf_file,
+            subtype_variable=subtype_variable,
         )
 
     if verbose:
@@ -260,7 +311,8 @@ def entropy_score(
         n_cores=n_cores, seed=seed, verbose=verbose,
     )[:, 0]
 
-    p_val = float((null_scores >= obs_score).sum() / permutations)
+    # +1/+1: random draws never include the observed configuration.
+    p_val = float(((null_scores >= obs_score).sum() + 1) / (permutations + 1))
 
     if plot:
         try:
@@ -283,6 +335,91 @@ def entropy_score(
     out["p.val"] = p_val
     out["mean.random.entropy"] = float(null_scores.mean())
     out["sd.random.entropy"] = float(null_scores.std(ddof=1))
+    out.attrs["method"] = "montecarlo"
+    return out
+
+
+def _relative_entropies(contig: np.ndarray) -> np.ndarray:
+    """Per-cell-type relative entropy (same formula as the R original)."""
+    x0, x1 = contig[0], contig[1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.abs(np.log2((x0 * np.log2(x1)) / (x0 * np.log2(x0))))
+
+
+def _sample_entropy_path(
+    groups, covariable, samples, label_order, weights, weight_cap,
+    permutations, n_bootstrap, max_exact, seed, verbose, plot, pdf_file,
+    subtype_variable,
+):
+    """Entropy score with the sample as the unit of independence.
+
+    Each group's composition is the weighted mean of its samples'
+    compositions (computed from all their cells, with the entropy
+    pseudocount). The null recomputes the score under every (or random)
+    relabelling of samples across groups; the CI resamples samples within
+    groups. Observed, null and CI share one formula.
+    """
+    if verbose:
+        print("Computing entropy proportion over covariables for groups: "
+              f"{label_order[0]} vs {label_order[1]}")
+    indexes = list(_table(groups, covariable).columns)
+    counts, _, group_idx, n_s = sample_count_matrix(
+        groups, samples, covariable, label_order, indexes,
+    )
+    w = sample_weights(n_s, weights, weight_cap)
+    props = per_sample_props(counts, "entropy")
+    rng = np.random.default_rng(seed)
+
+    def scores_of(assign):
+        comp = group_weighted_means(assign, props, w, 2)
+        return _distance_surprise_rows(comp[0], comp[1])
+
+    contig = group_weighted_means(group_idx[np.newaxis, :], props, w, 2)[:, 0, :]
+    obs_score = float(_distance_surprise(contig[0], contig[1]))
+    assign, exact = relabellings(group_idx, max_exact, permutations, rng)
+    null_scores = scores_of(assign)
+    n_perms = assign.shape[0]
+
+    # The score is symmetric, so the A↔B swap ties with the observed one
+    # whenever the groups have the same number of samples.
+    p_val = float(perm_pvalue(null_scores, obs_score, exact, "greater"))
+    equal_sizes = (group_idx == 0).sum() == (group_idx == 1).sum()
+    p_min = perm_pmin(n_perms, exact, mirror_tie=bool(equal_sizes))
+    report_design(label_order, group_idx, n_perms, exact, p_min, verbose,
+                  one_sided_hint=False)
+
+    boot_scores = np.empty(0)
+    if n_bootstrap and n_bootstrap > 1:
+        boot_rng = np.random.default_rng(None if seed is None else int(seed) + 7919)
+        boot_idx = bootstrap_indices(group_idx, n_bootstrap, boot_rng)
+        comps = bootstrap_group_means(boot_idx, group_idx, props, w, 2)
+        boot_scores = _distance_surprise_rows(comps[0], comps[1])
+
+    if plot:
+        try:
+            _plot_entropy(
+                contig=contig, indexes=indexes, label_order=label_order,
+                obs_score=obs_score, null_scores=null_scores, p_val=p_val,
+                subtype_variable=subtype_variable, boot_scores=boot_scores,
+                pdf_file=pdf_file,
+            )
+        except Exception as e:  # noqa: BLE001
+            if verbose:
+                print(f"(Plot skipped: {e})")
+
+    out = pd.Series(_relative_entropies(contig), index=indexes)
+    out["entropy_score"] = obs_score
+    out["p.val"] = p_val
+    out["mean.random.entropy"] = float(null_scores.mean())
+    out["sd.random.entropy"] = float(null_scores.std(ddof=1))
+    if len(boot_scores) > 1:
+        out["boot.sd"] = float(np.std(boot_scores, ddof=1))
+        out["boot.CI95low"] = float(np.quantile(boot_scores, 0.025))
+        out["boot.CI95high"] = float(np.quantile(boot_scores, 0.975))
+        out["boot.n"] = int(len(boot_scores))
+    out["p.min"] = p_min
+    out["n_perms"] = n_perms
+    out.attrs.update(method="sample_permutation", weights=weights, exact=exact)
     return out
 
 

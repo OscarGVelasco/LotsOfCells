@@ -40,6 +40,25 @@ doi: https://doi.org/10.1101/2024.05.23.595582
 
 ### Updates
 
+* **Unreleased**
+  - New sample-level permutation test (`method="sample_permutation"`,
+    default when `sample_id` is given) for `lots_of_cells` and
+    `entropy_score`; reports `p.min` and `n_perms`. The cell-level
+    Monte-Carlo test remains available as `method="montecarlo"`.
+  - **Fix:** `lots_of_cells` now normalises each group's composition
+    separately (as the original R package does). Previously each cell type
+    was normalised across groups, so `percent_in_*` did not sum to 1 per
+    group and the group with more cells (larger tissue area) appeared
+    enriched for every cell type. Fold-changes and p-values from earlier
+    versions are affected.
+  - Exact permutation p-values count the observed labelling once
+    (`gene_source_score`); Monte-Carlo p-values can no longer be 0.
+  - The sample-level test uses a pseudocount of ¼, `(c + ¼)/(n + ½)`,
+    instead of ½. With ½, smaller samples (less tissue area) looked
+    slightly enriched in rare cell types. ¼ removes the size-dependent bias
+    of the arcsin-sqrt transform (see
+    `simulation_benchmark/plasmode/pseudocount/`).
+
 * **v0.3.0**
   - Native AnnData / SpatialData / MuData support — pass the object directly,
     metadata is read from `.obs`.
@@ -316,10 +335,13 @@ combined with a Monte-Carlo simulation that gauges how extreme the
 observed values are relative to a random null. To compare the proportions
 of each class between two conditions, define the two labels and the order
 of the contrast via `label_order` (the fold-change is computed as
-`label_order[0] / label_order[1]`). Optionally, providing `sample_id`
-accounts for per-sample heterogeneity in the simulation.
+`label_order[0] / label_order[1]`). When `sample_id` is provided (and
+every group has at least two samples) the test is run at the **sample
+level** by default — see [Sample-level vs cell-level testing](#sample-level-vs-cell-level-testing-method).
 
-> ***NOTE*** *for significance testing we recommend an α value of 0.001.*
+> ***NOTE*** *for the cell-level Monte-Carlo test we recommend an α value
+> of 0.001. For the sample-level test the smallest achievable p-value is
+> set by the number of samples (reported as `p.min`).*
 
 A bubble plot of the differences in proportions is rendered alongside the
 result table. The pink ribbon around each point shows the standard
@@ -348,8 +370,11 @@ The returned `pandas.DataFrame` has one row per class found in
 | `percent_in_<label1>`    | proportion of this class in `label_order[0]`                  |
 | `percent_in_<label2>`    | proportion of this class in `label_order[1]`                  |
 | `p.adj`                  | Benjamini–Hochberg FDR-adjusted p-value                       |
-| `sd.montecarlo`          | standard deviation of the Monte-Carlo fold-change distribution|
+| `sd.montecarlo`          | standard deviation of the null fold-change distribution      |
 | `CI95low`, `CI95high`    | 95% confidence interval for the observed `groupFC`            |
+| `p.adj.fwer`             | sample-level test only: family-wise-error adjusted p-value (Westfall–Young step-down maxT, see *Small cohorts*) |
+| `p.val`                  | raw p-value                                                   |
+| `p.min`, `n_perms`       | sample-level test only: smallest achievable p-value and number of relabellings |
 
 If you only want the numerical results without the plot, pass
 `plot=False`. You can also redraw the plot at any time:
@@ -358,6 +383,77 @@ If you only want the numerical results without the plot, pass
 loc.plot_abundance_test(results, subtype_variable="cell_type",
                         pdf_file="abundance_test.pdf")
 ```
+
+### Sample-level vs cell-level testing (`method`)
+
+`lots_of_cells` and `entropy_score` offer two ways to build the null
+distribution:
+
+- **`method="sample_permutation"`** — the sample (patient, tissue section)
+  is the unit of independence. Each sample's composition is computed from
+  all of its cells; each group is the weighted mean of its samples'
+  arcsin-sqrt proportions; the null recomputes the same statistic after
+  reshuffling **sample labels** across groups (every relabelling is
+  enumerated when feasible); the 95% CI resamples samples within groups.
+  Observed value, null and CI share one formula, and between-sample
+  variability is part of the null. Per-sample proportions use a pseudocount
+  of ¼, `(c + ¼)/(n + ½)`: the value at which the arcsin-sqrt transform has no
+  first-order bias in the number of cells, so samples of different size are
+  comparable.
+- **`method="montecarlo"`** — the original cell-level Monte-Carlo test.
+- **`method="auto"`** *(default)* — `sample_permutation` when `sample_id` is
+  given and every group has ≥ 2 samples, otherwise `montecarlo`.
+
+Options for the sample-level test:
+
+| argument | meaning |
+|---|---|
+| `weights="sqrt"` | each sample weighted by √(cells), capped at `weight_cap` × median weight (default 2) — larger sections count more, but sub-linearly, so section size / tissue area cannot drive the estimate |
+| `weights="equal"` | one vote per sample |
+| `alternative` | `"two-sided"` (default), `"greater"` or `"less"` |
+| `n_bootstrap` | sample-bootstrap resamples for the CI |
+| `max_exact` | the exact number of relabellings is computed first; up to `max_exact` (default 20,000) every one is used, otherwise `max_exact` random relabellings are drawn (or `permutations`, if given). Exact up to e.g. 8 vs 8 or 6 vs 12; beyond that the smallest p is 1/20,001 |
+
+```python
+res = loc.lots_of_cells(adata, main_variable="condition",
+                        subtype_variable="cell_type", sample_id="patient",
+                        label_order=["treated", "untreated"])
+res.attrs["method"]          # 'sample_permutation'
+res[["groupFC", "p.val", "p.min"]]
+```
+
+**Small cohorts.** The precision of a sample-level test comes from the
+number of samples, not cells. The smallest achievable p-value is
+`1 / (number of relabellings)` — or twice that for a two-sided test with
+equal group sizes, because swapping the two groups ties with the observed
+split:
+
+| design | relabellings | min p (two-sided) |
+|---|---|---|
+| 3 vs 3 | 20 | 0.10 |
+| 4 vs 4 | 70 | 0.029 |
+| 4 vs 7 | 330 | 0.003 |
+| 5 vs 5 | 252 | 0.008 |
+| 6 vs 6 | 924 | 0.002 |
+
+A result at `p.val == p.min` is as strong as the cohort allows. A one-sided
+`alternative` (when the direction was specified beforehand) halves the
+floor for equal group sizes.
+
+**Two multiple-testing corrections.** `p.adj` is Benjamini–Hochberg on the
+per-type p-values (controls the false discovery rate). Because BH multiplies
+the per-type floor by the number of cell types, with ≤ 5 samples per group
+nothing can pass 5% (e.g. 5 vs 5 with 15 types: 15 × 0.008 > 0.05).
+`p.adj.fwer` uses the permutation null **jointly** across cell types
+(Westfall–Young step-down maxT on each fold change standardised by the SD of
+its own null): it controls the family-wise error rate — the chance of *any*
+false call — and keeps the dependence between cell types, so it is not tied
+to the per-type floor. In the plasmode benchmark (3 cohorts, 1000 replicates
+per setting) it kept the family-wise error at ≈ 0.05 for every n and found
+true changes at 5 vs 5 (TPR 0.017 at fold change 2, as propeller with BH)
+where BH found none, while giving up little from n = 10 on (n = 50: 0.56 vs
+0.59 for BH). Use `p.adj.fwer` for small cohorts or when every call must be
+right; `p.adj` otherwise.
 
 ### Symmetric Divergence Score — global dysregulation in class proportions
 
