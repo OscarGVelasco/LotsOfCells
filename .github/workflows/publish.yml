@@ -15,7 +15,8 @@ jobs:
   # ----------------------------------------------------------------------
   test:
     name: Test (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # ubuntu-latest (26.04) has no prebuilt Python 3.9; 24.04 still has 3.9–3.12
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
