@@ -174,7 +174,7 @@ def entropy_score(
     summary fields (``entropy_score``, ``p.val``, ``mean.random.entropy``,
     ``sd.random.entropy``).
 
-    ``method`` works as in :func:`lots_of_cells`: ``"sample_permutation"``
+    ``method``: ``"sample_permutation"``
     builds each group's composition as the (√n-weighted, by default) mean of
     per-sample compositions, permutes sample labels for the null and
     resamples samples within groups for the bootstrap CI (adds ``boot.*``,

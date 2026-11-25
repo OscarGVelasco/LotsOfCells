@@ -44,4 +44,21 @@ __all__ = [
     "plot_abundance_test",
 ]
 
-__version__ = "0.3.0"
+def _get_version() -> str:
+    """Version of the installed package (set by setuptools-scm from the git tag at
+    build time). From a source checkout that is not installed: the version
+    setuptools-scm derives from the git history, if available."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("lotsofcells")
+    except PackageNotFoundError:
+        pass
+    try:
+        from pathlib import Path
+        from setuptools_scm import get_version
+        return get_version(root=str(Path(__file__).resolve().parents[1]))
+    except Exception:  # noqa: BLE001 — no setuptools-scm, or not a git checkout
+        return "0+unknown"
+
+
+__version__ = _get_version()

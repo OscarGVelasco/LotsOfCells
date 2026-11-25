@@ -39,13 +39,19 @@ def bar_chart(
     colors: Optional[Sequence[str]] = None,
     table: Optional[str] = None,
     ax: Optional[plt.Axes] = None,
-    figsize=(7, 5),
+    figsize=None,
     pdf_file: Optional[str] = None,
 ):
     """Stacked barplot of subtype proportions per main_variable level.
 
     Mirrors the R ``bar_chart``. Pass ``pdf_file="path.pdf"`` to also save
     the figure to disk.
+
+    With ``sample_id`` there is one bar per sample, labelled with the sample
+    name (the group is shown by the coloured band under the bars). The
+    default ``figsize`` widens with the number of bars (up to 20 inches); the
+    labels shrink and, when there are too many to fit, only every k-th one
+    is shown.
     """
     metadata = get_metadata(sc_object, table=table)
     groups = metadata[main_variable].astype(str)
@@ -64,7 +70,7 @@ def bar_chart(
         if contribution:
             return _bar_chart_contribution(
                 groups, covariable, samples, order, color_map,
-                main_variable, subtype_variable, sample_id, figsize,
+                main_variable, subtype_variable, sample_id, figsize or (7, 5),
                 pdf_file=pdf_file,
             )
         composite_keys = (groups + SEP + samples).to_numpy()
@@ -86,7 +92,8 @@ def bar_chart(
     bar_keys = list(contig.index)
     if sample_id is not None:
         bar_main = [key_to_main[k] for k in bar_keys]
-        key_to_display = {k: k.replace(SEP, " · ") for k in bar_keys}
+        # the group is shown by the band under the bars: label the sample only
+        key_to_display = {k: k.split(SEP, 1)[1] for k in bar_keys}
     else:
         bar_main = bar_keys
         key_to_main = {k: k for k in bar_keys}
@@ -107,6 +114,8 @@ def bar_chart(
 
     # Plot
     if ax is None:
+        if figsize is None:
+            figsize = (min(max(7.0, 3.0 + 0.16 * len(contig)), 20.0), 5)
         fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.figure
@@ -133,10 +142,7 @@ def bar_chart(
             bottom += contig[cov].values
         ax.legend(title=f"Class: {subtype_variable}", bbox_to_anchor=(1.02, 1), loc="upper left")
 
-    ax.set_xticks(range(len(contig)))
-    ax.set_xticklabels(
-        [key_to_display[k] for k in contig.index], rotation=45, ha="right"
-    )
+    ax.set_xlim(-0.6, len(contig) - 0.4)
     ax.set_ylabel("percentage")
     ax.set_yticks(np.linspace(0, 1, 11))
     ax.set_yticklabels([f"{int(100 * v)}" for v in np.linspace(0, 1, 11)])
@@ -148,11 +154,32 @@ def bar_chart(
     else:
         ax.set_title(title)
 
-    # Annotate group bands at the bottom
-    _annotate_groups(ax, bar_main, main_levels)
+    # Annotate group bands at the bottom, sample labels below them
+    band_pts = _annotate_groups(ax, bar_main, main_levels)
+    fig.tight_layout()
+    _bar_xlabels(ax, [key_to_display[k] for k in contig.index], pad=band_pts + 3)
     fig.tight_layout()
     save_to_pdf(fig, pdf_file)
     return ax
+
+
+def _bar_xlabels(ax, labels, pad):
+    """Bar labels that do not overlap: font size follows the space per bar
+    (9 pt down to 5 pt); below that only every k-th label is shown.
+    Vertical when there are more than 12 bars."""
+    n = len(labels)
+    width_pts = ax.get_position().width * ax.figure.get_figwidth() * 72
+    per_bar = width_pts / max(n, 1)                  # points of axis per bar
+    vertical = n > 12
+    # rotated text needs about its line height (1.2 x font size) per bar
+    size = float(np.clip(per_bar / (1.25 if vertical else 0.9), 5, 9)) if vertical else 9.0
+    step = max(1, int(np.ceil(1.25 * size / per_bar))) if vertical else 1
+    ax.set_xticks(range(0, n, step))
+    ax.set_xticklabels(labels[::step], rotation=90 if vertical else 45,
+                       ha="center" if vertical else "right",
+                       rotation_mode="default" if vertical else "anchor",
+                       fontsize=size)
+    ax.tick_params(axis="x", length=0, pad=pad)
 
 
 def _group_colors(levels):
@@ -163,10 +190,17 @@ def _group_colors(levels):
 
 
 def _annotate_groups(ax, bar_main, main_levels):
+    """Coloured band per group just under the x axis. Returns its depth below
+    the axis in points (to place the tick labels underneath)."""
+    from matplotlib.transforms import blended_transform_factory
     palette = _group_colors(main_levels)
     color_for = dict(zip(main_levels, palette))
     n = len(bar_main)
-    ymin, ymax = -0.05, -0.02
+    # y in axes fraction, so the band keeps its size whatever the y limits
+    height_pts = ax.get_position().height * ax.figure.get_figheight() * 72
+    gap, depth = 2.0, 11.0                           # points
+    ymax, ymin = -gap / height_pts, -(gap + depth) / height_pts
+    trans = blended_transform_factory(ax.transData, ax.transAxes)
     runs = []
     start = 0
     for i in range(1, n):
@@ -176,12 +210,13 @@ def _annotate_groups(ax, bar_main, main_levels):
     runs.append((start, n - 1, bar_main[start]))
     for s, e, lbl in runs:
         ax.add_patch(mpatches.Rectangle(
-            (s - 0.5, ymin), (e - s + 1), (ymax - ymin),
+            (s - 0.5, ymin), (e - s + 1), (ymax - ymin), transform=trans,
             color=color_for[lbl], clip_on=False, zorder=3,
         ))
-        ax.text((s + e) / 2, (ymin + ymax) / 2, lbl,
+        ax.text((s + e) / 2, (ymin + ymax) / 2, lbl, transform=trans,
                 ha="center", va="center", color="white",
                 fontsize=8, style="italic", zorder=4)
+    return gap + depth
 
 
 def _bar_chart_contribution(
@@ -675,7 +710,8 @@ def plot_abundance_test(
     figsize=(8, 6),
     pdf_file: Optional[str] = None,
 ):
-    """Beautiful bubble plot of FC ± Monte-Carlo SD shown as pink ribbon."""
+    """Bubble plot of groupFC per covariable level: ± SD of the permutation null as a
+    pink ribbon, 95% bootstrap CI as a bar, colour = signed −log10(p.adj)."""
     df = table_results.sort_values("groupFC").copy()
     df["classLabel"] = df.index
     cols = list(df.columns)
@@ -696,8 +732,8 @@ def plot_abundance_test(
     # SD ribbon
     for i, (cls, row) in enumerate(df.iterrows()):
         ax.add_patch(mpatches.Rectangle(
-            (-row["sd.montecarlo"], i - 0.4),
-            2 * row["sd.montecarlo"], 0.8,
+            (-row["sd.null"], i - 0.4),
+            2 * row["sd.null"], 0.8,
             color="pink", alpha=0.3, zorder=1,
         ))
     # CI bars
@@ -718,7 +754,7 @@ def plot_abundance_test(
     ax.set_xlabel(f"log2(proportion_FC) : ({on_right}/{on_left})")
     ax.set_title(
         f"Fold-Change difference in proportion\n"
-        f"Monte-Carlo simulation on {subtype_variable}"
+        f"Sample-level permutation test on {subtype_variable}"
     )
     ax.text(-1, -0.6, on_left, color="grey", ha="center")
     ax.text(1, -0.6, on_right, color="grey", ha="center")
